@@ -59,6 +59,15 @@ chore: update the Rust toolchain version
 docs: add build instructions to the README
 ```
 
+## Versioning and Releases
+
+- The project follows [Semantic Versioning](https://semver.org).
+- A release is a git tag in the form `vMAJOR.MINOR.PATCH`, published as a
+  GitHub Release.
+- Once the Rust workspace exists, the workspace `Cargo.toml` holds the
+  current version as the single source of truth, and every crate inherits it.
+- The project does not publish a release yet.
+
 ## Pull Requests
 
 - Keep one pull request focused on one logical change.
