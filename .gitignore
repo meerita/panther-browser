@@ -10,6 +10,9 @@ CLAUDE.md
 *.rs.bk
 *.pdb
 
+# Local devtools
+/tools/docs-viewer/
+
 # Build outputs
 /build/
 /dist/
