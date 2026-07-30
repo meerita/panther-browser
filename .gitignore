@@ -1,0 +1,91 @@
+# Internal working directories
+tmp/
+.claude/
+.agents/
+
+# Rust
+/target/
+**/target/
+*.rs.bk
+*.pdb
+
+# Build outputs
+/build/
+/dist/
+/out/
+*.o
+*.obj
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+*.app
+*.dSYM/
+
+# GPU shader caches / compiled artifacts
+*.spv
+shader_cache/
+*.metallib
+
+# Test / coverage / benchmarks
+/coverage/
+*.profraw
+*.profdata
+criterion/
+flamegraph.svg
+perf.data*
+
+# Logs and crash dumps
+*.log
+logs/
+*.pid
+*.core
+core.*
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+Icon?
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# Linux
+*~
+.directory
+.Trash-*
+
+# Editors / IDEs
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+.vim/
+.netrwhist
+
+# Nix / direnv
+.direnv/
+.envrc.local
+
+# Misc
+*.bak
+*.tmp
+*.temp
