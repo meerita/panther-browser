@@ -2,6 +2,7 @@
 tmp/
 .claude/
 .agents/
+CLAUDE.md
 
 # Rust
 /target/
