@@ -13,4 +13,5 @@ publish = false
 workspace = true
 
 [dependencies]
+capability-system.workspace = true
 purr-engine = { path = "../engine" }

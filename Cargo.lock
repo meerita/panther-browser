@@ -36,6 +36,7 @@ dependencies = [
 name = "purr-embedding"
 version = "0.0.0"
 dependencies = [
+ "capability-system",
  "purr-engine",
 ]
 
