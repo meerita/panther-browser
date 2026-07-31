@@ -27,6 +27,8 @@ mod capability_id;
 mod capability_manager;
 #[path = "capability-provider.rs"]
 mod capability_provider;
+#[path = "capability-report.rs"]
+mod capability_report;
 #[path = "capability-request-error.rs"]
 mod capability_request_error;
 #[path = "catalogue.rs"]
@@ -41,6 +43,8 @@ mod category;
 mod deciding_authority;
 #[path = "effective-state.rs"]
 mod effective_state;
+#[path = "engine-policy-snapshot.rs"]
+mod engine_policy_snapshot;
 #[path = "lifecycle.rs"]
 mod lifecycle;
 #[path = "maturity.rs"]
@@ -60,6 +64,7 @@ pub use capability_definition::CapabilityDefinition;
 pub use capability_id::CapabilityId;
 pub use capability_manager::{DEFAULT_FAILURE_THRESHOLD, Manager};
 pub use capability_provider::CapabilityProvider;
+pub use capability_report::CapabilityReport;
 pub use capability_request_error::CapabilityRequestError;
 pub use catalogue::Catalogue;
 pub use catalogue_build_error::CatalogueBuildError;
@@ -67,6 +72,7 @@ pub use catalogue_builder::CatalogueBuilder;
 pub use category::Category;
 pub use deciding_authority::DecidingAuthority;
 pub use effective_state::EffectiveState;
+pub use engine_policy_snapshot::{EngineCapabilityState, EnginePolicySnapshot};
 pub use lifecycle::{FailureCategory, Lifecycle};
 pub use maturity::Maturity;
 pub use owner::Owner;

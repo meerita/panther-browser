@@ -5,12 +5,16 @@
 use std::collections::HashMap;
 
 use crate::availability::Availability;
+use crate::capability_definition::CapabilityDefinition;
 use crate::capability_id::CapabilityId;
 use crate::capability_provider::CapabilityProvider;
+use crate::capability_report::CapabilityReport;
 use crate::capability_request_error::CapabilityRequestError;
 use crate::catalogue::Catalogue;
 use crate::effective_state::EffectiveState;
+use crate::engine_policy_snapshot::{EngineCapabilityState, EnginePolicySnapshot};
 use crate::lifecycle::{FailureCategory, Lifecycle};
+use crate::owner::Owner;
 use crate::policy_inputs::{PolicyInputs, UserPreference};
 use crate::resolver::{Resolution, resolve};
 
@@ -186,6 +190,53 @@ impl Manager {
         }
     }
 
+    /// Builds a read-only diagnostic report for one capability, or `None` when
+    /// the catalogue does not hold the identifier.
+    pub fn report(&self, id: CapabilityId) -> Option<CapabilityReport> {
+        let definition = self.catalogue.get(id)?;
+        let state = self.effective_state(id)?;
+        Some(CapabilityReport::new(
+            definition.id,
+            definition.owner,
+            definition.category,
+            definition.maturity,
+            self.inputs.preference(id),
+            state,
+            self.unmet_dependencies(definition),
+        ))
+    }
+
+    /// Builds a report for every capability in the catalogue, in catalogue
+    /// insertion order.
+    pub fn catalogue_report(&self) -> Vec<CapabilityReport> {
+        self.catalogue
+            .definitions()
+            .iter()
+            .filter_map(|definition| self.report(definition.id))
+            .collect()
+    }
+
+    /// Builds the downward effective engine-policy snapshot from the resolved
+    /// state of every `purr.*` capability, in catalogue insertion order.
+    pub fn engine_policy_snapshot(&self) -> EnginePolicySnapshot {
+        let entries = self
+            .catalogue
+            .definitions()
+            .iter()
+            .filter(|definition| definition.owner == Owner::Purr)
+            .filter_map(|definition| {
+                let state = self.resolution.state(definition.id)?;
+                Some(EngineCapabilityState::new(
+                    definition.id,
+                    state.availability(),
+                    state.reason(),
+                    state.authority(),
+                ))
+            })
+            .collect();
+        EnginePolicySnapshot::new(entries)
+    }
+
     fn is_available(&self, id: CapabilityId) -> bool {
         matches!(
             self.resolution.state(id),
@@ -198,6 +249,18 @@ impl Manager {
             .get(&id)
             .copied()
             .unwrap_or(Lifecycle::Dormant)
+    }
+
+    /// Collects the dependencies of a definition whose resolved availability is
+    /// not available. A dependency absent from the catalogue counts as unmet, so
+    /// the report stays fail closed.
+    fn unmet_dependencies(&self, definition: &CapabilityDefinition) -> Vec<CapabilityId> {
+        definition
+            .dependencies
+            .iter()
+            .copied()
+            .filter(|&dependency| !self.is_available(dependency))
+            .collect()
     }
 
     fn activate_now(&mut self, id: CapabilityId) {
@@ -250,13 +313,17 @@ mod tests {
     use crate::catalogue::Catalogue;
     use crate::catalogue_builder::CatalogueBuilder;
     use crate::category::Category;
+    use crate::deciding_authority::DecidingAuthority;
+    use crate::engine_policy_snapshot::EngineCapabilityState;
     use crate::lifecycle::{FailureCategory, Lifecycle};
     use crate::maturity::Maturity;
     use crate::owner::Owner;
     use crate::policy_inputs::{PolicyInputs, UserPreference};
+    use crate::reason::Reason;
 
     const OPTIONAL: CapabilityId = CapabilityId::new("purr.author-styles");
     const MANDATORY: CapabilityId = CapabilityId::new("purr.user-agent-styles");
+    const PRODUCT: CapabilityId = CapabilityId::new("panther.reading-mode");
     const NO_DEPENDENCIES: &[CapabilityId] = &[];
 
     struct SucceedingProvider;
@@ -343,6 +410,36 @@ mod tests {
 
     fn manager() -> Manager {
         Manager::new(catalogue(), supported_inputs())
+    }
+
+    fn product_definition(id: CapabilityId) -> CapabilityDefinition {
+        CapabilityDefinition {
+            id,
+            owner: Owner::Panther,
+            category: Category::ProductFeature,
+            maturity: Maturity::Stable,
+            dependencies: NO_DEPENDENCIES,
+            is_mandatory: false,
+            is_built: true,
+        }
+    }
+
+    /// Builds a manager whose catalogue mixes `purr.*` and `panther.*`
+    /// capabilities, so the engine snapshot filter can be observed.
+    fn mixed_manager() -> Manager {
+        let mut builder = CatalogueBuilder::new();
+        builder
+            .add(definition(OPTIONAL, false))
+            .add(definition(MANDATORY, true))
+            .add(product_definition(PRODUCT));
+        let catalogue = builder.build().expect("the fixture catalogue should build");
+
+        let mut inputs = PolicyInputs::new();
+        inputs
+            .mark_supported(OPTIONAL)
+            .mark_supported(MANDATORY)
+            .mark_supported(PRODUCT);
+        Manager::new(catalogue, inputs)
     }
 
     #[test]
@@ -466,6 +563,59 @@ mod tests {
         assert_eq!(
             manager.request_activation(OPTIONAL),
             Err(CapabilityRequestError::NotAvailable(OPTIONAL))
+        );
+    }
+
+    #[test]
+    fn a_report_reflects_resolved_state_and_lifecycle() {
+        let mut manager = manager();
+        manager.register_provider(OPTIONAL, Box::new(SucceedingProvider));
+        manager
+            .request_activation(OPTIONAL)
+            .expect("activation should be accepted");
+
+        let report = manager.report(OPTIONAL).expect("a report should exist");
+
+        assert_eq!(report.id(), OPTIONAL);
+        assert_eq!(report.owner(), Owner::Purr);
+        assert_eq!(report.category(), Category::EngineService);
+        assert_eq!(report.availability(), Availability::Available);
+        assert_eq!(report.reason(), Reason::DefaultAvailable);
+        assert_eq!(report.authority(), DecidingAuthority::UserPreference);
+        assert_eq!(report.lifecycle(), Some(Lifecycle::Active));
+        assert!(report.unmet_dependencies().is_empty());
+        assert!(!report.message().is_empty());
+    }
+
+    #[test]
+    fn the_catalogue_report_lists_every_capability_once() {
+        let manager = manager();
+
+        let reports = manager.catalogue_report();
+
+        assert_eq!(reports.len(), 2);
+        let ids: Vec<CapabilityId> = reports.iter().map(|report| report.id()).collect();
+        assert!(ids.contains(&OPTIONAL));
+        assert!(ids.contains(&MANDATORY));
+    }
+
+    #[test]
+    fn the_engine_snapshot_contains_only_purr_entries() {
+        let manager = mixed_manager();
+
+        let snapshot = manager.engine_policy_snapshot();
+
+        assert_eq!(snapshot.entries().len(), 2);
+        for entry in snapshot.entries() {
+            assert_eq!(entry.id().owner_namespace(), "purr");
+            assert_eq!(entry.availability(), Availability::Available);
+        }
+        assert!(snapshot.get(PRODUCT).is_none());
+        assert_eq!(
+            snapshot
+                .get(OPTIONAL)
+                .map(EngineCapabilityState::availability),
+            Some(Availability::Available)
         );
     }
 }
