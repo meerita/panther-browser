@@ -17,8 +17,16 @@
 
 #[path = "availability.rs"]
 mod availability;
+#[path = "capability-definition.rs"]
+mod capability_definition;
 #[path = "capability-id.rs"]
 mod capability_id;
+#[path = "catalogue.rs"]
+mod catalogue;
+#[path = "catalogue-build-error.rs"]
+mod catalogue_build_error;
+#[path = "catalogue-builder.rs"]
+mod catalogue_builder;
 #[path = "category.rs"]
 mod category;
 #[path = "deciding-authority.rs"]
@@ -35,7 +43,11 @@ mod owner;
 mod reason;
 
 pub use availability::{Availability, UnavailableStatus};
+pub use capability_definition::CapabilityDefinition;
 pub use capability_id::CapabilityId;
+pub use catalogue::Catalogue;
+pub use catalogue_build_error::CatalogueBuildError;
+pub use catalogue_builder::CatalogueBuilder;
 pub use category::Category;
 pub use deciding_authority::DecidingAuthority;
 pub use effective_state::EffectiveState;
