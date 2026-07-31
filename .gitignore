@@ -13,6 +13,10 @@ CLAUDE.md
 # Local devtools
 /tools/docs-viewer/
 
+# Node.js
+node_modules/
+.next/
+
 # Build outputs
 /build/
 /dist/
