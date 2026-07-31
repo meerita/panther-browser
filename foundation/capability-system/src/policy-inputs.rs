@@ -61,6 +61,11 @@ impl PolicyInputs {
         self
     }
 
+    pub fn clear_quarantine(&mut self, id: CapabilityId) -> &mut Self {
+        self.quarantined.remove(&id);
+        self
+    }
+
     pub fn is_supported(&self, id: CapabilityId) -> bool {
         self.supported.contains(&id)
     }

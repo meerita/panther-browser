@@ -15,12 +15,20 @@
 //! [`EffectiveState`] type keeps these axes orthogonal so that a lifecycle can
 //! never attach to an unavailable capability.
 
+#[path = "activation-failure.rs"]
+mod activation_failure;
 #[path = "availability.rs"]
 mod availability;
 #[path = "capability-definition.rs"]
 mod capability_definition;
 #[path = "capability-id.rs"]
 mod capability_id;
+#[path = "capability-manager.rs"]
+mod capability_manager;
+#[path = "capability-provider.rs"]
+mod capability_provider;
+#[path = "capability-request-error.rs"]
+mod capability_request_error;
 #[path = "catalogue.rs"]
 mod catalogue;
 #[path = "catalogue-build-error.rs"]
@@ -46,9 +54,13 @@ mod reason;
 #[path = "resolver.rs"]
 mod resolver;
 
+pub use activation_failure::ActivationFailure;
 pub use availability::{Availability, UnavailableStatus};
 pub use capability_definition::CapabilityDefinition;
 pub use capability_id::CapabilityId;
+pub use capability_manager::{DEFAULT_FAILURE_THRESHOLD, Manager};
+pub use capability_provider::CapabilityProvider;
+pub use capability_request_error::CapabilityRequestError;
 pub use catalogue::Catalogue;
 pub use catalogue_build_error::CatalogueBuildError;
 pub use catalogue_builder::CatalogueBuilder;
