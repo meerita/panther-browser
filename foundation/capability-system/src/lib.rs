@@ -39,8 +39,12 @@ mod lifecycle;
 mod maturity;
 #[path = "owner.rs"]
 mod owner;
+#[path = "policy-inputs.rs"]
+mod policy_inputs;
 #[path = "reason.rs"]
 mod reason;
+#[path = "resolver.rs"]
+mod resolver;
 
 pub use availability::{Availability, UnavailableStatus};
 pub use capability_definition::CapabilityDefinition;
@@ -54,4 +58,6 @@ pub use effective_state::EffectiveState;
 pub use lifecycle::{FailureCategory, Lifecycle};
 pub use maturity::Maturity;
 pub use owner::Owner;
+pub use policy_inputs::{PolicyInputs, UserPreference};
 pub use reason::{Reason, reason_message};
+pub use resolver::{Resolution, resolve};
