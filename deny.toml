@@ -28,6 +28,9 @@ confidence-threshold = 0.9
 [bans]
 multiple-versions = "deny"
 wildcards = "deny"
+# Internal workspace crates depend on each other by path without a version, which
+# cargo-deny reports as a wildcard. Registry wildcards stay denied.
+allow-wildcard-paths = true
 
 [sources]
 unknown-registry = "deny"
