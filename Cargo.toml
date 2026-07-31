@@ -9,6 +9,7 @@ members = [
     "products/panther/browser",
     "engines/purr/embedding",
     "engines/purr/engine",
+    "foundation/capability-system",
 ]
 default-members = ["apps/panther"]
 
@@ -17,6 +18,8 @@ edition = "2024"
 license = "MIT"
 
 [workspace.dependencies]
+capability-system = { path = "foundation/capability-system" }
+thiserror = "2"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

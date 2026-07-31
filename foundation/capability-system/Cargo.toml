@@ -1,0 +1,16 @@
+# @file foundation/capability-system/Cargo.toml
+# @description Declares the shared capability mechanism and vocabulary package.
+# @created Diego Martín Lafuente <meerita@icloud.com>
+
+[package]
+name = "capability-system"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+thiserror = { workspace = true }
