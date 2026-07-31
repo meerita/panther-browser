@@ -1,9 +1,9 @@
-# @file engines/purr/engine/Cargo.toml
-# @description Declares the Purr web engine core package.
+# @file foundation/capability-system/Cargo.toml
+# @description Declares the shared capability mechanism and vocabulary package.
 # @created Diego Martín Lafuente <meerita@icloud.com>
 
 [package]
-name = "purr-engine"
+name = "capability-system"
 version = "0.0.0"
 edition.workspace = true
 license.workspace = true
@@ -13,4 +13,4 @@ publish = false
 workspace = true
 
 [dependencies]
-capability-system.workspace = true
+thiserror = { workspace = true }

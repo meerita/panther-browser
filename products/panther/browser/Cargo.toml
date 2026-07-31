@@ -1,6 +1,6 @@
 # @file products/panther/browser/Cargo.toml
 # @description Declares the Panther browser product library.
-# @created Diego Lafuente <diego.lafuente@cognativinc.com>
+# @created Diego Martín Lafuente <meerita@icloud.com>
 
 [package]
 name = "panther-browser"
@@ -14,3 +14,5 @@ workspace = true
 
 [dependencies]
 purr-embedding = { path = "../../../engines/purr/embedding" }
+capability-system.workspace = true
+thiserror.workspace = true

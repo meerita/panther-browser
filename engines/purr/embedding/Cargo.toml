@@ -1,6 +1,6 @@
 # @file engines/purr/embedding/Cargo.toml
 # @description Declares the Purr embedding package that hosts the engine.
-# @created Diego Lafuente <diego.lafuente@cognativinc.com>
+# @created Diego Martín Lafuente <meerita@icloud.com>
 
 [package]
 name = "purr-embedding"
@@ -13,4 +13,5 @@ publish = false
 workspace = true
 
 [dependencies]
+capability-system.workspace = true
 purr-engine = { path = "../engine" }

@@ -1,6 +1,6 @@
 # @file Makefile
 # @description Root developer interface for the local documentation reader.
-# @created Diego Lafuente <diego.lafuente@cognativinc.com>
+# @created Diego Martín Lafuente <meerita@icloud.com>
 
 DOCS_VIEWER := tools/docs-viewer
 

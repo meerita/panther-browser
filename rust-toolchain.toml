@@ -1,6 +1,6 @@
 # @file rust-toolchain.toml
 # @description Pins the Rust toolchain channel and required components.
-# @created Diego Lafuente <diego.lafuente@cognativinc.com>
+# @created Diego Martín Lafuente <meerita@icloud.com>
 
 [toolchain]
 channel = "stable"

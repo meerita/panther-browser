@@ -1,6 +1,6 @@
 # @file Cargo.toml
 # @description Defines the virtual workspace and its member packages.
-# @created Diego Lafuente <diego.lafuente@cognativinc.com>
+# @created Diego Martín Lafuente <meerita@icloud.com>
 
 [workspace]
 resolver = "3"
@@ -9,6 +9,7 @@ members = [
     "products/panther/browser",
     "engines/purr/embedding",
     "engines/purr/engine",
+    "foundation/capability-system",
 ]
 default-members = ["apps/panther"]
 
@@ -17,6 +18,9 @@ edition = "2024"
 license = "MIT"
 
 [workspace.dependencies]
+anyhow = "1"
+capability-system = { path = "foundation/capability-system" }
+thiserror = "2"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

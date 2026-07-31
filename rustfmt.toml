@@ -1,6 +1,6 @@
 # @file rustfmt.toml
 # @description Configures source formatting for the workspace.
-# @created Diego Lafuente <diego.lafuente@cognativinc.com>
+# @created Diego Martín Lafuente <meerita@icloud.com>
 
 edition = "2024"
 newline_style = "Unix"

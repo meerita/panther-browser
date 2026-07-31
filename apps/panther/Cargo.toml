@@ -1,6 +1,6 @@
 # @file apps/panther/Cargo.toml
 # @description Declares the Panther application binary.
-# @created Diego Lafuente <diego.lafuente@cognativinc.com>
+# @created Diego Martín Lafuente <meerita@icloud.com>
 
 [package]
 name = "panther"
@@ -13,4 +13,5 @@ publish = false
 workspace = true
 
 [dependencies]
+anyhow.workspace = true
 panther-browser = { path = "../../products/panther/browser" }
