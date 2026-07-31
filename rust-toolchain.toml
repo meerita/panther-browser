@@ -1,0 +1,8 @@
+# @file rust-toolchain.toml
+# @description Pins the Rust toolchain channel and required components.
+# @created Diego Lafuente <diego.lafuente@cognativinc.com>
+
+[toolchain]
+channel = "stable"
+profile = "minimal"
+components = ["clippy", "rustfmt"]

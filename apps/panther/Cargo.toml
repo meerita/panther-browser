@@ -1,0 +1,16 @@
+# @file apps/panther/Cargo.toml
+# @description Declares the Panther application binary.
+# @created Diego Lafuente <diego.lafuente@cognativinc.com>
+
+[package]
+name = "panther"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+panther-browser = { path = "../../products/panther/browser" }

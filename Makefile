@@ -4,7 +4,7 @@
 
 DOCS_VIEWER := tools/docs-viewer
 
-.PHONY: documentation docs help
+.PHONY: documentation docs help fmt fmt-check check clippy test
 
 ## help: List the available targets
 help:
@@ -26,3 +26,23 @@ documentation:
 
 ## docs: Alias for `documentation`
 docs: documentation
+
+## fmt: Format all workspace sources
+fmt:
+	cargo fmt --all
+
+## fmt-check: Check formatting without writing changes
+fmt-check:
+	cargo fmt --all --check
+
+## check: Type-check the whole workspace
+check:
+	cargo check --workspace --all-targets
+
+## clippy: Lint the whole workspace and deny warnings
+clippy:
+	cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+## test: Run the workspace test suite
+test:
+	cargo test --workspace --all-targets
