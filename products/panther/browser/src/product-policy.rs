@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use capability_system::{CapabilityId, PolicyInputs, UserPreference};
-use purr_embedding::EngineCapabilityOffer;
+use purr_embedding::{EngineCapabilityOffer, SERVICE_WORKERS};
 
 use crate::product_capabilities::{DEVELOPER_MODE, product_capabilities};
 
@@ -44,9 +44,11 @@ impl BootstrapConfig {
 /// Product capabilities run in process, so their platform support defaults to
 /// true. Engine capabilities take their support from the engine probe carried by
 /// each offer, so an unsupported engine capability (WebGPU in M0) stays
-/// unsupported. Any override in the config wins over both. Developer mode is off
-/// until a user preference turns it on, so it carries a default disable
-/// preference; a later enable request lifts it.
+/// unsupported. Any override in the config wins over both. Developer mode and
+/// service workers are off until a user preference turns them on, so each carries
+/// a default disable preference; a later enable request lifts it. Service workers
+/// are engine owned but disabled by product policy in M0, so the product sets the
+/// default here rather than the engine.
 pub fn build_policy_inputs(
     offers: &[EngineCapabilityOffer],
     config: &BootstrapConfig,
@@ -66,6 +68,7 @@ pub fn build_policy_inputs(
     }
 
     inputs.set_preference(DEVELOPER_MODE, UserPreference::Disable);
+    inputs.set_preference(SERVICE_WORKERS, UserPreference::Disable);
 
     inputs
 }
@@ -75,7 +78,7 @@ mod tests {
     use super::{BootstrapConfig, build_policy_inputs};
     use crate::product_capabilities::DEVELOPER_MODE;
     use capability_system::{CapabilityId, UserPreference};
-    use purr_embedding::engine_capability_offers;
+    use purr_embedding::{SERVICE_WORKERS, engine_capability_offers};
 
     /// Finds the engine capability the probe reports unsupported. In M0 this is
     /// WebGPU. The test finds it through the boundary rather than naming the
@@ -117,6 +120,17 @@ mod tests {
 
         assert_eq!(
             inputs.preference(DEVELOPER_MODE),
+            Some(UserPreference::Disable)
+        );
+    }
+
+    #[test]
+    fn service_workers_are_off_by_default() {
+        let offers = engine_capability_offers();
+        let inputs = build_policy_inputs(&offers, &BootstrapConfig::new());
+
+        assert_eq!(
+            inputs.preference(SERVICE_WORKERS),
             Some(UserPreference::Disable)
         );
     }

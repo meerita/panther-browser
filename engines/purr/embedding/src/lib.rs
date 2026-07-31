@@ -8,10 +8,10 @@
 //! the engine core and must not depend on any Panther product package.
 //!
 //! It is the narrow two-way capability boundary. Upward it surfaces the engine
-//! capability offers (declaration, platform support, and provider) as shared
-//! vocabulary types. Downward it holds the effective engine-policy snapshot the
-//! product resolves and exposes it for engine diagnostics. Only shared
-//! `capability-system` types cross the boundary.
+//! capability offers (declaration, platform support, and provider) and the
+//! engine capability identifiers as shared vocabulary types. Downward it holds
+//! the effective engine-policy snapshot the product resolves and exposes it for
+//! engine diagnostics. Only shared `capability-system` types cross the boundary.
 
 #[path = "engine-capability-offer.rs"]
 mod engine_capability_offer;
@@ -20,3 +20,8 @@ mod engine_policy_holder;
 
 pub use engine_capability_offer::{EngineCapabilityOffer, engine_capability_offers};
 pub use engine_policy_holder::EnginePolicyHolder;
+
+// Engine capability identifiers surfaced as shared `CapabilityId` values so the
+// product can name an engine capability in its policy without reaching the
+// engine core.
+pub use purr_engine::{AUTHOR_STYLES, SERVICE_WORKERS, USER_AGENT_STYLES, WEBGPU};
