@@ -42,6 +42,9 @@ dependencies = [
 [[package]]
 name = "purr-engine"
 version = "0.0.0"
+dependencies = [
+ "capability-system",
+]
 
 [[package]]
 name = "quote"
