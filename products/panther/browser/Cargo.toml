@@ -14,3 +14,5 @@ workspace = true
 
 [dependencies]
 purr-embedding = { path = "../../../engines/purr/embedding" }
+capability-system.workspace = true
+thiserror.workspace = true

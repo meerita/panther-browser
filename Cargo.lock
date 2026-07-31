@@ -20,7 +20,9 @@ dependencies = [
 name = "panther-browser"
 version = "0.0.0"
 dependencies = [
+ "capability-system",
  "purr-embedding",
+ "thiserror",
 ]
 
 [[package]]
