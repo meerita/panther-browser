@@ -1,6 +1,6 @@
 // @file products/panther/browser/src/lib.rs
 // @description Library root for the Panther browser product.
-// @created Diego Lafuente <diego.lafuente@cognativinc.com>
+// @created Diego Martín Lafuente <meerita@icloud.com>
 
 //! Panther browser product.
 //!

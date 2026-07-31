@@ -1,6 +1,6 @@
 // @file engines/purr/engine/src/lib.rs
 // @description Library root for the Purr web engine core.
-// @created Diego Lafuente <diego.lafuente@cognativinc.com>
+// @created Diego Martín Lafuente <meerita@icloud.com>
 
 //! Purr web engine core.
 //!

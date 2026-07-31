@@ -1,6 +1,6 @@
 // @file apps/panther/src/main.rs
 // @description Entry point for the Panther application binary.
-// @created Diego Lafuente <diego.lafuente@cognativinc.com>
+// @created Diego Martín Lafuente <meerita@icloud.com>
 
 //! Panther application entry point.
 //!

@@ -1,6 +1,6 @@
 # @file engines/purr/engine/Cargo.toml
 # @description Declares the Purr web engine core package.
-# @created Diego Lafuente <diego.lafuente@cognativinc.com>
+# @created Diego Martín Lafuente <meerita@icloud.com>
 
 [package]
 name = "purr-engine"

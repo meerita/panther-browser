@@ -1,6 +1,6 @@
 // @file engines/purr/embedding/src/lib.rs
 // @description Library root for the Purr embedding layer.
-// @created Diego Lafuente <diego.lafuente@cognativinc.com>
+// @created Diego Martín Lafuente <meerita@icloud.com>
 
 //! Purr embedding layer.
 //!

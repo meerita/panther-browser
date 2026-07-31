@@ -1,6 +1,6 @@
 # @file apps/panther/Cargo.toml
 # @description Declares the Panther application binary.
-# @created Diego Lafuente <diego.lafuente@cognativinc.com>
+# @created Diego Martín Lafuente <meerita@icloud.com>
 
 [package]
 name = "panther"

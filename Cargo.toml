@@ -1,6 +1,6 @@
 # @file Cargo.toml
 # @description Defines the virtual workspace and its member packages.
-# @created Diego Lafuente <diego.lafuente@cognativinc.com>
+# @created Diego Martín Lafuente <meerita@icloud.com>
 
 [workspace]
 resolver = "3"
