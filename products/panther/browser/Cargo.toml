@@ -1,0 +1,16 @@
+# @file products/panther/browser/Cargo.toml
+# @description Declares the Panther browser product library.
+# @created Diego Lafuente <diego.lafuente@cognativinc.com>
+
+[package]
+name = "panther-browser"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+purr-embedding = { path = "../../../engines/purr/embedding" }
