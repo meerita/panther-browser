@@ -18,6 +18,7 @@ edition = "2024"
 license = "MIT"
 
 [workspace.dependencies]
+anyhow = "1"
 capability-system = { path = "foundation/capability-system" }
 thiserror = "2"
 

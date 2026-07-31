@@ -24,6 +24,7 @@ mod product_policy;
 mod product_providers;
 
 pub use capability_assembly::{AssemblyError, BootstrapResult, bootstrap, bootstrap_with};
+pub use capability_system::Availability;
 pub use product_capabilities::{
     DEVELOPER_MODE, DEVELOPER_TOOLS, REMOTE_DEBUGGING, product_capabilities,
 };
