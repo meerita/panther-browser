@@ -27,3 +27,7 @@ rust-embed = { workspace = true }
 sys-locale = { workspace = true }
 thiserror = { workspace = true }
 unic-langid = { workspace = true }
+
+[dev-dependencies]
+fluent = { workspace = true }
+locale = { workspace = true }
