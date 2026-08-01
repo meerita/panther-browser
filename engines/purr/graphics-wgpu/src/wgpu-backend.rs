@@ -414,7 +414,7 @@ impl WgpuBackend {
         }
 
         let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("purr-graphics-wgpu draw uniform"),
+            label: Some("purr-graphics-wgpu-draw-uniform"),
             size: bytes.len() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
@@ -870,7 +870,7 @@ mod tests {
         let format = wgpu::TextureFormat::Rgba8Unorm;
         let extent = Extent2d::new(64, 64);
         let target = backend.device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("purr-graphics-wgpu test target"),
+            label: Some("purr-graphics-wgpu-test-target"),
             size: wgpu::Extent3d {
                 width: extent.width,
                 height: extent.height,

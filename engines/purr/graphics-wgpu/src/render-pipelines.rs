@@ -58,11 +58,11 @@ impl ShaderResources {
         let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
 
         let solid_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("purr-graphics-wgpu solid color"),
+            label: Some("purr-graphics-wgpu-solid-color"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/solid-color.wgsl").into()),
         });
         let textured_module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("purr-graphics-wgpu textured quad"),
+            label: Some("purr-graphics-wgpu-textured-quad"),
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders/textured-quad.wgsl").into()),
         });
 
@@ -71,7 +71,7 @@ impl ShaderResources {
         }
 
         let uniform_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("purr-graphics-wgpu draw uniform"),
+            label: Some("purr-graphics-wgpu-draw-uniform"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
                 visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
@@ -85,7 +85,7 @@ impl ShaderResources {
         });
 
         let texture_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("purr-graphics-wgpu texture"),
+            label: Some("purr-graphics-wgpu-texture"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
@@ -108,19 +108,19 @@ impl ShaderResources {
 
         let solid_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("purr-graphics-wgpu solid color"),
+                label: Some("purr-graphics-wgpu-solid-color"),
                 bind_group_layouts: &[Some(&uniform_layout)],
                 immediate_size: 0,
             });
         let textured_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("purr-graphics-wgpu textured quad"),
+                label: Some("purr-graphics-wgpu-textured-quad"),
                 bind_group_layouts: &[Some(&uniform_layout), Some(&texture_layout)],
                 immediate_size: 0,
             });
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("purr-graphics-wgpu linear"),
+            label: Some("purr-graphics-wgpu-linear"),
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
@@ -166,7 +166,7 @@ impl ShaderResources {
         let targets = [Some(color_target(format))];
 
         let solid = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("purr-graphics-wgpu solid color"),
+            label: Some("purr-graphics-wgpu-solid-color"),
             layout: Some(&self.solid_pipeline_layout),
             vertex: vertex_state(&self.solid_module),
             primitive: primitive_state(),
@@ -182,7 +182,7 @@ impl ShaderResources {
             cache: None,
         });
         let textured = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("purr-graphics-wgpu textured quad"),
+            label: Some("purr-graphics-wgpu-textured-quad"),
             layout: Some(&self.textured_pipeline_layout),
             vertex: vertex_state(&self.textured_module),
             primitive: primitive_state(),
