@@ -12,6 +12,7 @@ members = [
     "engines/purr/engine",
     "foundation/capability-system",
     "foundation/locale",
+    "tools/localization-check",
 ]
 default-members = ["apps/panther"]
 

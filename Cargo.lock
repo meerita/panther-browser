@@ -744,6 +744,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "localization-check"
+version = "0.1.0"
+dependencies = [
+ "fluent-syntax",
+ "thiserror 2.0.19",
+ "unic-langid",
+]
+
+[[package]]
 name = "lock_api"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"

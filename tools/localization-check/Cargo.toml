@@ -1,0 +1,22 @@
+# @file tools/localization-check/Cargo.toml
+# @description Declares the localization validation and no-prose check tool.
+# @created Diego Martín Lafuente <meerita@icloud.com>
+
+[package]
+name = "localization-check"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "localization-check"
+path = "src/main.rs"
+
+[dependencies]
+fluent-syntax = { workspace = true }
+thiserror = { workspace = true }
+unic-langid = { workspace = true }
