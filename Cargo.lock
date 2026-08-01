@@ -10,14 +10,14 @@ checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
 name = "capability-system"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "thiserror",
 ]
 
 [[package]]
 name = "panther"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "panther-browser",
@@ -25,7 +25,7 @@ dependencies = [
 
 [[package]]
 name = "panther-browser"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "capability-system",
  "purr-embedding",
@@ -43,7 +43,7 @@ dependencies = [
 
 [[package]]
 name = "purr-embedding"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "capability-system",
  "purr-engine",
@@ -51,7 +51,7 @@ dependencies = [
 
 [[package]]
 name = "purr-engine"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "capability-system",
 ]

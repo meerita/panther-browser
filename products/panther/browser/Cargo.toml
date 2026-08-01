@@ -4,7 +4,7 @@
 
 [package]
 name = "panther-browser"
-version = "0.0.0"
+version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish = false
