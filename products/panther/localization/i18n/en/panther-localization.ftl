@@ -19,6 +19,18 @@ permissions-camera-title = Allow { $site } to use the camera?
 # The button that grants a permission request.
 permissions-allow = Allow
 
+## Tabs.
+
+# The count of open tabs. $count (number) drives the plural category. $formatted
+# (string) is the same count already formatted for the region locale; it is
+# isolated for bidi safety. The number and its display are separate arguments so
+# no translated text is concatenated.
+tabs-open =
+    { $count ->
+        [one] One tab is open
+       *[other] { $formatted } tabs are open
+    }
+
 ## Capability reasons.
 ## Placeholder namespace filled in a later phase. The capability system reports
 ## typed reasons; the Panther adapter maps them to capability-reason-* keys here.

@@ -2,8 +2,10 @@
 // @description Loads and shares the Fluent message bundles behind an Arc.
 // @created Diego Martín Lafuente <meerita@icloud.com>
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use fluent::FluentValue;
 use i18n_embed::LanguageLoader;
 use i18n_embed::fluent::FluentLanguageLoader;
 use i18n_embed_fl::fl;
@@ -13,6 +15,7 @@ use crate::baked_resource_provider::BakedResourceProvider;
 use crate::embedded_localizations::EmbeddedLocalizations;
 use crate::locale_generation::LocaleGeneration;
 use crate::localized_message::LocalizedMessage;
+use crate::message_arguments::{MessageArgument, MessageArguments};
 use crate::resource_provider::ResourceProvider;
 use crate::resource_validation::validate_ftl;
 
@@ -91,6 +94,33 @@ impl MessageCatalog {
         self.bounded(id, self.loader.get(id))
     }
 
+    /// Resolves a message with named arguments supplied as typed data.
+    ///
+    /// The arguments are typed values, never preformatted prose, so the message
+    /// template controls all wording and no translated text is concatenated. A
+    /// numeric argument drives the Fluent plural and select categories.
+    /// Interpolated values stay bidi-isolated, because the loader keeps
+    /// placeable isolation on. An unknown id falls back to the id itself rather
+    /// than crashing.
+    pub fn message_with_arguments(
+        &self,
+        id: &str,
+        arguments: &MessageArguments,
+    ) -> LocalizedMessage {
+        if !self.loader.has(id) {
+            return self.bounded(id, id.to_owned());
+        }
+        let mut values = HashMap::with_capacity(arguments.entries().len());
+        for (name, argument) in arguments.entries() {
+            let value = match argument {
+                MessageArgument::Text(text) => FluentValue::from(text.as_str()),
+                MessageArgument::Integer(number) => FluentValue::from(*number),
+            };
+            values.insert(*name, value);
+        }
+        self.bounded(id, self.loader.get_args_concrete(id, values))
+    }
+
     /// Resolves the window title.
     pub fn window_title(&self) -> LocalizedMessage {
         self.bounded("window-title", fl!(self.loader, "window-title"))
@@ -131,6 +161,7 @@ mod tests {
     use std::sync::Arc;
 
     use super::MessageCatalog;
+    use crate::message_arguments::{MessageArgument, MessageArguments};
 
     #[test]
     fn seed_key_resolves_under_en() {
@@ -157,5 +188,76 @@ mod tests {
         let catalog = MessageCatalog::load();
         let shared = catalog.clone();
         assert!(Arc::ptr_eq(&catalog.loader, &shared.loader));
+    }
+
+    #[test]
+    fn plural_message_selects_by_count() {
+        let catalog = MessageCatalog::load();
+
+        let single = catalog.message_with_arguments(
+            "tabs-open",
+            &MessageArguments::new().with("count", MessageArgument::Integer(1)),
+        );
+        assert_eq!(single.text(), "One tab is open");
+
+        let several = catalog.message_with_arguments(
+            "tabs-open",
+            &MessageArguments::new()
+                .with("count", MessageArgument::Integer(1000))
+                .with("formatted", MessageArgument::Text("1,000".to_owned())),
+        );
+        assert!(several.text().contains("1,000"));
+        assert!(several.text().contains("tabs are open"));
+    }
+
+    #[test]
+    fn named_arguments_are_placed_by_name() {
+        let catalog = MessageCatalog::load();
+        let message = catalog.message_with_arguments(
+            "permissions-camera-title",
+            &MessageArguments::new().with("site", MessageArgument::Text("example.com".to_owned())),
+        );
+        assert!(message.text().contains("example.com"));
+        assert!(message.text().contains("camera"));
+    }
+
+    #[test]
+    fn missing_key_with_arguments_falls_back_without_crashing() {
+        let catalog = MessageCatalog::load();
+        let message = catalog.message_with_arguments(
+            "does-not-exist",
+            &MessageArguments::new().with("count", MessageArgument::Integer(2)),
+        );
+        assert_eq!(message.text(), "does-not-exist");
+    }
+
+    #[test]
+    fn non_english_plural_category_resolves_via_fixture() {
+        use fluent::{FluentArgs, FluentBundle, FluentResource};
+
+        let source = concat!(
+            "items = { $count ->\n",
+            "    [zero] zero\n",
+            "    [one] one\n",
+            "    [two] two\n",
+            "    [few] few\n",
+            "    [many] many\n",
+            "   *[other] other\n",
+            "}\n",
+        );
+        let resource = FluentResource::try_new(source.to_owned()).expect("valid fixture");
+        let arabic = "ar".parse().expect("valid language identifier");
+        let mut bundle: FluentBundle<FluentResource> = FluentBundle::new(vec![arabic]);
+        bundle.set_use_isolating(false);
+        bundle.add_resource(resource).expect("resource added");
+
+        let message = bundle.get_message("items").expect("message exists");
+        let pattern = message.value().expect("message has a value");
+        let mut arguments = FluentArgs::new();
+        arguments.set("count", 3);
+        let mut errors = Vec::new();
+        let formatted = bundle.format_pattern(pattern, Some(&arguments), &mut errors);
+
+        assert_eq!(formatted, "few");
     }
 }

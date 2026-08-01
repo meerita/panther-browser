@@ -13,10 +13,12 @@ publish = false
 workspace = true
 
 [dependencies]
+fixed_decimal = { workspace = true }
 fluent = { workspace = true }
 fluent-syntax = { workspace = true }
 i18n-embed = { workspace = true }
 i18n-embed-fl = { workspace = true }
+icu = { workspace = true }
 icu_locale = { workspace = true }
 locale = { workspace = true }
 rust-embed = { workspace = true }

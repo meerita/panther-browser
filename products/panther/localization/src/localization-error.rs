@@ -18,4 +18,8 @@ pub enum LocalizationError {
     /// A resource exists but is not valid and cannot be used.
     #[error("the localization resource is not valid")]
     InvalidResource,
+
+    /// A regional formatter could not be built for the requested locale.
+    #[error("the regional formatter is unavailable")]
+    FormatterUnavailable,
 }

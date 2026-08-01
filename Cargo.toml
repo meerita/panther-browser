@@ -23,11 +23,13 @@ license = "MIT"
 [workspace.dependencies]
 anyhow = "1"
 capability-system = { path = "foundation/capability-system" }
+fixed_decimal = "0.7"
 fluent = "0.17"
 fluent-langneg = "0.13"
 fluent-syntax = "0.12"
 i18n-embed = { version = "0.16", features = ["fluent-system", "rust-embed"] }
 i18n-embed-fl = "0.10"
+icu = { version = "2.2", features = ["compiled_data"] }
 icu_locale = "2.2"
 icu_locale_core = "2.2"
 locale = { path = "foundation/locale" }

@@ -26,6 +26,8 @@ mod active_locales;
 mod baked_resource_provider;
 #[path = "embedded-localizations.rs"]
 mod embedded_localizations;
+#[path = "formatter-cache.rs"]
+mod formatter_cache;
 #[path = "locale-generation.rs"]
 mod locale_generation;
 #[path = "locale-request.rs"]
@@ -42,6 +44,8 @@ mod message_adapter;
 mod message_arguments;
 #[path = "message-catalog.rs"]
 mod message_catalog;
+#[path = "regional-formatter.rs"]
+mod regional_formatter;
 #[path = "resource-provider.rs"]
 mod resource_provider;
 #[path = "resource-validation.rs"]
@@ -51,6 +55,7 @@ mod system_locales;
 
 pub use active_locales::ActiveLocales;
 pub use baked_resource_provider::BakedResourceProvider;
+pub use formatter_cache::FormatterCache;
 pub use locale_generation::LocaleGeneration;
 pub use locale_request::LocaleRequest;
 pub use locale_resolver::LocaleResolver;
@@ -59,5 +64,6 @@ pub use localized_message::LocalizedMessage;
 pub use message_adapter::MessageAdapter;
 pub use message_arguments::{MessageArgument, MessageArguments};
 pub use message_catalog::MessageCatalog;
+pub use regional_formatter::RegionalFormatter;
 pub use resource_provider::ResourceProvider;
 pub use system_locales::detect_system_locales;
