@@ -23,9 +23,22 @@ impl LocaleGeneration {
     /// never match a real generation boundary.
     pub const DETACHED: Self = Self(0);
 
-    /// Wraps a raw generation value produced by the resolution service.
+    /// The first real generation, before any runtime language change.
+    pub(crate) const FIRST: Self = Self(1);
+
+    /// Builds a generation from a raw value for a specific test scenario.
+    #[cfg(test)]
     pub(crate) const fn new(value: u64) -> Self {
         Self(value)
+    }
+
+    /// Returns the next generation after a runtime language change.
+    ///
+    /// The value saturates rather than wraps, so a generation never returns to
+    /// an earlier value even at the numeric limit, and a stale cached value can
+    /// never match a later generation by accident.
+    pub(crate) const fn next(self) -> Self {
+        Self(self.0.saturating_add(1))
     }
 
     /// Returns the raw generation value.

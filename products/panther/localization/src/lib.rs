@@ -17,9 +17,15 @@
 //! pattern. The [`MessageCatalog`] parses the baked Fluent catalogues once into
 //! shared bundles and resolves seed keys into localized text. The
 //! [`LocaleResolver`] selects the active user-interface and region locales from
-//! the user, profile, and operating-system inputs. Later phases add formatting
-//! and runtime switching.
+//! the user, profile, and operating-system inputs. The [`ActiveLocaleState`] is
+//! the single source of truth for the active locales: a language or region
+//! change re-resolves, advances a [`LocaleGeneration`], and notifies subscribers
+//! through the [`LocaleBroadcast`] so they re-pull their text. Generation-aware
+//! caches never serve a localized or formatted value across a generation
+//! boundary.
 
+#[path = "active-locale-state.rs"]
+mod active_locale_state;
 #[path = "active-locales.rs"]
 mod active_locales;
 #[path = "baked-resource-provider.rs"]
@@ -28,6 +34,8 @@ mod baked_resource_provider;
 mod embedded_localizations;
 #[path = "formatter-cache.rs"]
 mod formatter_cache;
+#[path = "locale-broadcast.rs"]
+mod locale_broadcast;
 #[path = "locale-generation.rs"]
 mod locale_generation;
 #[path = "locale-request.rs"]
@@ -53,9 +61,11 @@ mod resource_validation;
 #[path = "system-locales.rs"]
 mod system_locales;
 
+pub use active_locale_state::ActiveLocaleState;
 pub use active_locales::ActiveLocales;
 pub use baked_resource_provider::BakedResourceProvider;
 pub use formatter_cache::FormatterCache;
+pub use locale_broadcast::{LocaleBroadcast, LocaleChangeListener};
 pub use locale_generation::LocaleGeneration;
 pub use locale_request::LocaleRequest;
 pub use locale_resolver::LocaleResolver;

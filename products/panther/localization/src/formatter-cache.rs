@@ -7,20 +7,32 @@ use std::sync::{Arc, Mutex};
 
 use locale::Locale;
 
+use crate::locale_generation::LocaleGeneration;
 use crate::regional_formatter::RegionalFormatter;
 
 /// The reference locale identifier and formatter fallback.
 const REFERENCE: &str = "en";
 
-/// Caches one [`RegionalFormatter`] per region locale.
+/// The generation-tagged formatter map.
+///
+/// The generation guards the map so that a formatter built under an earlier
+/// active locale can never be served after a runtime language change.
+struct CacheState {
+    generation: LocaleGeneration,
+    formatters: HashMap<Locale, Arc<RegionalFormatter>>,
+}
+
+/// Caches one [`RegionalFormatter`] per region locale for one generation.
 ///
 /// A formatter is built the first time a region is requested and shared behind
-/// an [`Arc`] on every later request, so a formatter is never rebuilt per call.
-/// A region without formatting data reuses the reference formatter, so a lookup
-/// always returns a usable formatter and never fails.
+/// an [`Arc`] on every later request in the same generation, so a formatter is
+/// never rebuilt per call. When the active-locale generation advances the cache
+/// clears, so no formatter is served across a generation boundary. A region
+/// without formatting data reuses the reference formatter, so a lookup always
+/// returns a usable formatter and never fails.
 pub struct FormatterCache {
     reference: Arc<RegionalFormatter>,
-    formatters: Mutex<HashMap<Locale, Arc<RegionalFormatter>>>,
+    state: Mutex<CacheState>,
 }
 
 impl FormatterCache {
@@ -32,23 +44,33 @@ impl FormatterCache {
             .expect("the reference locale has compiled formatting data");
         Self {
             reference,
-            formatters: Mutex::new(HashMap::new()),
+            state: Mutex::new(CacheState {
+                generation: LocaleGeneration::FIRST,
+                formatters: HashMap::new(),
+            }),
         }
     }
 
-    /// Returns the shared formatter for a region locale.
-    pub fn get(&self, region: &Locale) -> Arc<RegionalFormatter> {
-        let mut formatters = self
-            .formatters
+    /// Returns the shared formatter for a region locale at a generation.
+    ///
+    /// A generation later than the cached one clears the cache first, so a
+    /// formatter from a previous active locale is never returned.
+    pub fn get(&self, region: &Locale, generation: LocaleGeneration) -> Arc<RegionalFormatter> {
+        let mut state = self
+            .state
             .lock()
             .expect("the formatter cache lock is not poisoned");
-        if let Some(existing) = formatters.get(region) {
+        if state.generation != generation {
+            state.formatters.clear();
+            state.generation = generation;
+        }
+        if let Some(existing) = state.formatters.get(region) {
             return existing.clone();
         }
         let formatter = RegionalFormatter::new(region)
             .map(Arc::new)
             .unwrap_or_else(|_| self.reference.clone());
-        formatters.insert(region.clone(), formatter.clone());
+        state.formatters.insert(region.clone(), formatter.clone());
         formatter
     }
 }
@@ -62,6 +84,7 @@ impl Default for FormatterCache {
 #[cfg(test)]
 mod tests {
     use super::FormatterCache;
+    use crate::locale_generation::LocaleGeneration;
     use locale::Locale;
     use std::sync::Arc;
 
@@ -69,16 +92,32 @@ mod tests {
     fn repeated_lookup_reuses_the_same_instance() {
         let cache = FormatterCache::new();
         let region = Locale::parse("en-US").expect("valid identifier");
-        let first = cache.get(&region);
-        let second = cache.get(&region);
+        let first = cache.get(&region, LocaleGeneration::FIRST);
+        let second = cache.get(&region, LocaleGeneration::FIRST);
         assert!(Arc::ptr_eq(&first, &second));
     }
 
     #[test]
     fn distinct_regions_get_distinct_instances() {
         let cache = FormatterCache::new();
-        let english = cache.get(&Locale::parse("en-US").expect("valid identifier"));
-        let german = cache.get(&Locale::parse("de-DE").expect("valid identifier"));
+        let generation = LocaleGeneration::FIRST;
+        let english = cache.get(
+            &Locale::parse("en-US").expect("valid identifier"),
+            generation,
+        );
+        let german = cache.get(
+            &Locale::parse("de-DE").expect("valid identifier"),
+            generation,
+        );
         assert!(!Arc::ptr_eq(&english, &german));
+    }
+
+    #[test]
+    fn advancing_the_generation_invalidates_a_cached_formatter() {
+        let cache = FormatterCache::new();
+        let region = Locale::parse("en-US").expect("valid identifier");
+        let first = cache.get(&region, LocaleGeneration::new(1));
+        let rebuilt = cache.get(&region, LocaleGeneration::new(2));
+        assert!(!Arc::ptr_eq(&first, &rebuilt));
     }
 }

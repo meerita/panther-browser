@@ -79,7 +79,21 @@ impl MessageCatalog {
         Self {
             loader: Arc::new(loader),
             reference,
-            generation: LocaleGeneration::new(1),
+            generation: LocaleGeneration::FIRST,
+        }
+    }
+
+    /// Returns a catalog stamped at the given active-locale generation.
+    ///
+    /// A runtime language change advances the active generation. Every resolved
+    /// message must carry the current generation so a generation-aware cache
+    /// drops it once the generation advances. The bundles are shared behind an
+    /// [`Arc`], so this reuses the parsed data and only replaces the generation.
+    pub fn at_generation(&self, generation: LocaleGeneration) -> Self {
+        Self {
+            loader: Arc::clone(&self.loader),
+            reference: self.reference.clone(),
+            generation,
         }
     }
 
@@ -229,6 +243,17 @@ mod tests {
             &MessageArguments::new().with("count", MessageArgument::Integer(2)),
         );
         assert_eq!(message.text(), "does-not-exist");
+    }
+
+    #[test]
+    fn messages_carry_the_active_generation() {
+        use crate::locale_generation::LocaleGeneration;
+
+        let catalog = MessageCatalog::load();
+        assert_eq!(catalog.window_title().generation().value(), 1);
+
+        let advanced = catalog.at_generation(LocaleGeneration::new(5));
+        assert_eq!(advanced.window_title().generation().value(), 5);
     }
 
     #[test]
