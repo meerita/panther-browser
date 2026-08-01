@@ -17,7 +17,9 @@ fluent = { workspace = true }
 fluent-syntax = { workspace = true }
 i18n-embed = { workspace = true }
 i18n-embed-fl = { workspace = true }
+icu_locale = { workspace = true }
 locale = { workspace = true }
 rust-embed = { workspace = true }
+sys-locale = { workspace = true }
 thiserror = { workspace = true }
 unic-langid = { workspace = true }

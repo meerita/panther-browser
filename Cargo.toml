@@ -33,6 +33,7 @@ icu_locale_core = "2.2"
 locale = { path = "foundation/locale" }
 panther-localization = { path = "products/panther/localization" }
 rust-embed = "8"
+sys-locale = "0.3"
 thiserror = "2"
 unic-langid = "0.9"
 

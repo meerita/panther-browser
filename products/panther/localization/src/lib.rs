@@ -15,15 +15,23 @@
 //! the only text a user interface sink accepts, which keeps raw strings out of
 //! text sinks; a typed state becomes a message through the [`MessageAdapter`]
 //! pattern. The [`MessageCatalog`] parses the baked Fluent catalogues once into
-//! shared bundles and resolves seed keys into localized text. Later phases add
-//! formatting, resolution, and runtime switching.
+//! shared bundles and resolves seed keys into localized text. The
+//! [`LocaleResolver`] selects the active user-interface and region locales from
+//! the user, profile, and operating-system inputs. Later phases add formatting
+//! and runtime switching.
 
+#[path = "active-locales.rs"]
+mod active_locales;
 #[path = "baked-resource-provider.rs"]
 mod baked_resource_provider;
 #[path = "embedded-localizations.rs"]
 mod embedded_localizations;
 #[path = "locale-generation.rs"]
 mod locale_generation;
+#[path = "locale-request.rs"]
+mod locale_request;
+#[path = "locale-resolver.rs"]
+mod locale_resolver;
 #[path = "localization-error.rs"]
 mod localization_error;
 #[path = "localized-message.rs"]
@@ -38,12 +46,18 @@ mod message_catalog;
 mod resource_provider;
 #[path = "resource-validation.rs"]
 mod resource_validation;
+#[path = "system-locales.rs"]
+mod system_locales;
 
+pub use active_locales::ActiveLocales;
 pub use baked_resource_provider::BakedResourceProvider;
 pub use locale_generation::LocaleGeneration;
+pub use locale_request::LocaleRequest;
+pub use locale_resolver::LocaleResolver;
 pub use localization_error::LocalizationError;
 pub use localized_message::LocalizedMessage;
 pub use message_adapter::MessageAdapter;
 pub use message_arguments::{MessageArgument, MessageArguments};
 pub use message_catalog::MessageCatalog;
 pub use resource_provider::ResourceProvider;
+pub use system_locales::detect_system_locales;
