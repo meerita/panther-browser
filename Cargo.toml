@@ -10,6 +10,7 @@ members = [
     "products/panther/localization",
     "engines/purr/embedding",
     "engines/purr/engine",
+    "engines/purr/graphics",
     "foundation/capability-system",
     "foundation/locale",
     "tools/localization-check",
@@ -36,6 +37,7 @@ icu_locale = "2.2"
 icu_locale_core = "2.2"
 locale = { path = "foundation/locale" }
 panther-localization = { path = "products/panther/localization" }
+purr-graphics = { path = "engines/purr/graphics" }
 rust-embed = "8"
 sys-locale = "0.3"
 thiserror = "2"
