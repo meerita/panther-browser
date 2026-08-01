@@ -11,7 +11,7 @@ use crate::lifecycle::{FailureCategory, Lifecycle};
 use crate::maturity::Maturity;
 use crate::owner::Owner;
 use crate::policy_inputs::UserPreference;
-use crate::reason::{Reason, reason_message};
+use crate::reason::{Reason, reason_code};
 
 /// Read-only diagnostic view of one capability.
 ///
@@ -110,8 +110,12 @@ impl CapabilityReport {
         &self.unmet_dependencies
     }
 
-    /// Returns the derived, human-readable explanation of the deciding reason.
-    pub fn message(&self) -> &'static str {
-        reason_message(self.state.reason())
+    /// Returns the stable, language-neutral code of the deciding reason.
+    ///
+    /// The code is a cross-boundary contract for logs, telemetry, and support.
+    /// It is never localized. Presentation code turns it into user-facing text
+    /// at the localization boundary.
+    pub fn reason_code(&self) -> &'static str {
+        reason_code(self.state.reason())
     }
 }
