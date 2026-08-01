@@ -11,6 +11,7 @@ members = [
     "engines/purr/embedding",
     "engines/purr/engine",
     "engines/purr/graphics",
+    "engines/purr/graphics-software",
     "engines/purr/graphics-wgpu",
     "foundation/capability-system",
     "foundation/locale",

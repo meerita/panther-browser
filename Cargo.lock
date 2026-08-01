@@ -1476,6 +1476,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "purr-graphics-software"
+version = "0.1.0"
+dependencies = [
+ "purr-graphics",
+ "raw-window-handle",
+]
+
+[[package]]
 name = "purr-graphics-wgpu"
 version = "0.1.0"
 dependencies = [
