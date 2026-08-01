@@ -16,6 +16,8 @@
 
 #[path = "backend.rs"]
 mod backend;
+#[path = "backend-selection.rs"]
+mod backend_selection;
 #[path = "descriptor.rs"]
 mod descriptor;
 #[path = "graphics-error.rs"]
@@ -26,6 +28,7 @@ mod identity;
 mod submission;
 
 pub use backend::{BackendKind, GraphicsBackend, WindowSurface};
+pub use backend_selection::select_backend;
 
 pub use descriptor::{
     AlphaMode, BufferDescriptor, BufferUsage, Color, ColorSpace, Extent2d, MAX_TEXTURE_EXTENT,
