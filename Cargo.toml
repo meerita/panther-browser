@@ -10,6 +10,7 @@ members = [
     "engines/purr/embedding",
     "engines/purr/engine",
     "foundation/capability-system",
+    "foundation/locale",
 ]
 default-members = ["apps/panther"]
 
@@ -21,6 +22,9 @@ license = "MIT"
 [workspace.dependencies]
 anyhow = "1"
 capability-system = { path = "foundation/capability-system" }
+icu_locale = "2.2"
+icu_locale_core = "2.2"
+locale = { path = "foundation/locale" }
 thiserror = "2"
 
 [workspace.lints.rust]
