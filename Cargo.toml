@@ -7,6 +7,7 @@ resolver = "3"
 members = [
     "apps/panther",
     "products/panther/browser",
+    "products/panther/localization",
     "engines/purr/embedding",
     "engines/purr/engine",
     "foundation/capability-system",
@@ -26,6 +27,7 @@ fluent-langneg = "0.13"
 icu_locale = "2.2"
 icu_locale_core = "2.2"
 locale = { path = "foundation/locale" }
+panther-localization = { path = "products/panther/localization" }
 thiserror = "2"
 unic-langid = "0.9"
 

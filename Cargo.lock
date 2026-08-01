@@ -131,7 +131,16 @@ name = "panther-browser"
 version = "0.1.0"
 dependencies = [
  "capability-system",
+ "panther-localization",
  "purr-embedding",
+ "thiserror",
+]
+
+[[package]]
+name = "panther-localization"
+version = "0.1.0"
+dependencies = [
+ "locale",
  "thiserror",
 ]
 
