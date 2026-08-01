@@ -48,13 +48,15 @@ fn provider_for(id: CapabilityId) -> Box<dyn CapabilityProvider> {
 #[cfg(test)]
 mod tests {
     use super::engine_capability_offers;
-    use purr_engine::{AUTHOR_STYLES, SERVICE_WORKERS, USER_AGENT_STYLES, WEBGPU};
+    use purr_engine::{
+        AUTHOR_STYLES, GPU_ACCELERATION, SERVICE_WORKERS, USER_AGENT_STYLES, WEBGPU,
+    };
 
     #[test]
-    fn the_upward_api_surfaces_the_four_engine_capabilities_with_support() {
+    fn the_upward_api_surfaces_the_five_engine_capabilities_with_support() {
         let offers = engine_capability_offers();
 
-        assert_eq!(offers.len(), 4);
+        assert_eq!(offers.len(), 5);
         for offer in &offers {
             assert_eq!(offer.definition.id.owner_namespace(), "purr");
         }
@@ -69,6 +71,7 @@ mod tests {
         assert_eq!(support(USER_AGENT_STYLES), Some(true));
         assert_eq!(support(AUTHOR_STYLES), Some(true));
         assert_eq!(support(SERVICE_WORKERS), Some(true));
+        assert_eq!(support(GPU_ACCELERATION), Some(true));
         assert_eq!(support(WEBGPU), Some(false));
     }
 }
