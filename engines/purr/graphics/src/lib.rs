@@ -12,11 +12,18 @@
 //! platform GPU type appears here. Backend and native types live only inside
 //! the adapter and windowing crates, behind this interface.
 
+#[path = "descriptor.rs"]
+mod descriptor;
 #[path = "graphics-error.rs"]
 mod graphics_error;
 #[path = "identity.rs"]
 mod identity;
 
+pub use descriptor::{
+    AlphaMode, BufferDescriptor, BufferUsage, Color, ColorSpace, Extent2d, MAX_TEXTURE_EXTENT,
+    PipelineKind, PresentationTargetDescriptor, RenderTargetDescriptor, TextureDescriptor,
+    TextureFormatClass,
+};
 pub use graphics_error::GraphicsError;
 pub use identity::{
     DeviceGeneration, FrameToken, GpuResourceIdentity, ProducerNamespace, ResourceGeneration,
