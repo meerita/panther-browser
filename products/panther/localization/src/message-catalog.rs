@@ -197,20 +197,22 @@ fn new_loader(languages: &[LanguageIdentifier]) -> FluentLanguageLoader {
 /// Returns the embedded catalogue languages that hold valid Fluent content.
 ///
 /// A resource that is unavailable, oversized, or not valid Fluent is dropped.
-/// The reference language always remains, so the set is never empty.
+/// The reference language leads and always remains, so the set is never empty
+/// and the default catalog resolves against the reference regardless of the
+/// order the resources are embedded in.
 fn validated_available_languages() -> Vec<LanguageIdentifier> {
     let provider = BakedResourceProvider;
-    let mut languages = Vec::new();
+    let reference = locale::to_language_identifier(&reference_locale());
+    let mut languages = vec![reference.clone()];
     for candidate in provider.available_locales() {
+        let language = locale::to_language_identifier(&candidate);
+        if language == reference {
+            continue;
+        }
         match provider.load(&candidate, RESOURCE_FILE) {
-            Ok(bytes) if validate_ftl(bytes.as_ref()).is_ok() => {
-                languages.push(locale::to_language_identifier(&candidate));
-            }
+            Ok(bytes) if validate_ftl(bytes.as_ref()).is_ok() => languages.push(language),
             _ => {}
         }
-    }
-    if languages.is_empty() {
-        languages.push(locale::to_language_identifier(&reference_locale()));
     }
     languages
 }

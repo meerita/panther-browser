@@ -48,6 +48,9 @@ mod locale_generation;
 mod locale_request;
 #[path = "locale-resolver.rs"]
 mod locale_resolver;
+#[cfg(test)]
+#[path = "locale-snapshots.rs"]
+mod locale_snapshots;
 #[path = "localization-error.rs"]
 mod localization_error;
 #[path = "localized-message.rs"]

@@ -1,0 +1,52 @@
+# @file products/panther/localization/icu4x-datagen.toml
+# @description Slims baked ICU4X data to the shipped locales.
+# @created Diego Martín Lafuente <meerita@icloud.com>
+
+# ICU4X ships full CLDR data through the `compiled_data` feature. This file pins
+# the locale set the product actually serves, so a slimmed data provider can be
+# generated with `icu4x-datagen` when the localization crate is baked into a
+# shippable binary. The shipped locales match the message catalogues under
+# `i18n/`; `und` is the root fallback locale.
+
+[locales]
+shipped = ["en", "es", "ar", "ja"]
+fallback = "und"
+
+# The formatters in this crate drive these ICU4X components. When a shippable
+# binary links this crate, prefer `--markers-for-bin` so the exact marker set is
+# read from the binary and stays in step with the code.
+[components]
+used = [
+    "decimal",   # DecimalFormatter: numbers, durations, file sizes
+    "list",      # ListFormatter: regional conjunction lists
+    "datetime",  # DateTimeFormatter and NoCalendarFormatter: dates and times
+    "plurals",   # PluralRules: cardinal categories for Fluent selection
+    "locale",    # canonicalizer, directionality, and fallback for locale identity
+]
+
+# Generation command, applied when a shippable binary links this crate:
+#
+#   icu4x-datagen \
+#     --locales en es ar ja und \
+#     --markers-for-bin target/release/panther \
+#     --format baked \
+#     --out products/panther/localization/icu4x-data
+#
+# The generated provider then replaces `compiled_data`, and each formatter moves
+# from `try_new` to `try_new_unstable` against the baked provider.
+
+# Binary-size monitoring. The baked-binary delta cannot be measured yet: the
+# application binary (`apps/panther`) links `panther-browser` only, so no
+# shippable binary links this crate or its ICU4X data. Record the linked-binary
+# delta here once localization is wired into the shell. The per-locale message
+# catalogue sizes are the first recorded data point.
+[size]
+status = "linked-binary delta pending; localization not yet linked into a shippable binary"
+full_compiled_data = "all CLDR locales (baseline before slimming)"
+slimmed_target = "en, es, ar, ja, und"
+
+[size.catalogue_bytes]
+en = 2553
+es = 2542
+ar = 3060
+ja = 2680
