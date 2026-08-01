@@ -38,6 +38,7 @@ icu_locale_core = "2.2"
 locale = { path = "foundation/locale" }
 panther-localization = { path = "products/panther/localization" }
 purr-graphics = { path = "engines/purr/graphics" }
+raw-window-handle = "0.6"
 rust-embed = "8"
 sys-locale = "0.3"
 thiserror = "2"
