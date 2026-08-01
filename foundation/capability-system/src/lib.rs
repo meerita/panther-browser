@@ -77,5 +77,5 @@ pub use lifecycle::{FailureCategory, Lifecycle};
 pub use maturity::Maturity;
 pub use owner::Owner;
 pub use policy_inputs::{PolicyInputs, UserPreference};
-pub use reason::{Reason, reason_message};
+pub use reason::{Reason, reason_code};
 pub use resolver::{Resolution, resolve};

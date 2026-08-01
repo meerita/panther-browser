@@ -1,0 +1,8 @@
+# @file products/panther/localization/i18n.toml
+# @description Configures the Fluent localization domain and baked assets.
+# @created Diego Martín Lafuente <meerita@icloud.com>
+
+fallback_language = "en"
+
+[fluent]
+assets_dir = "i18n"

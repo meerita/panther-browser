@@ -4,7 +4,7 @@
 
 DOCS_VIEWER := tools/docs-viewer
 
-.PHONY: documentation docs help fmt fmt-check check clippy test
+.PHONY: documentation docs help fmt fmt-check check clippy test i18n-check
 
 ## help: List the available targets
 help:
@@ -46,3 +46,7 @@ clippy:
 ## test: Run the workspace test suite
 test:
 	cargo test --workspace --all-targets
+
+## i18n-check: Validate localization catalogues and scan for prose leaks
+i18n-check:
+	cargo run --quiet --package localization-check

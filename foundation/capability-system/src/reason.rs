@@ -1,5 +1,5 @@
 // @file foundation/capability-system/src/reason.rs
-// @description Defines resolution reasons and their diagnostic messages.
+// @description Defines resolution reasons and their stable diagnostic codes.
 // @created Diego Martín Lafuente <meerita@icloud.com>
 
 /// Deciding cause of an effective state.
@@ -20,48 +20,55 @@ pub enum Reason {
     DefaultAvailable,
 }
 
-/// Returns a short factual English sentence for a reason.
+/// Returns the stable, language-neutral code for a reason.
 ///
-/// The text is static and allocation-free so it stays cheap on diagnostic
-/// paths. It describes the cause only and adds no capability-specific context.
-pub const fn reason_message(reason: Reason) -> &'static str {
+/// The code is a deliberate cross-boundary contract, not the Rust variant name.
+/// It stays canonical for logs, telemetry, and support, and it is never
+/// localized. Presentation code turns the code and its typed reason into text at
+/// the localization boundary. The function is `const` and allocation-free so it
+/// stays cheap on diagnostic paths.
+pub const fn reason_code(reason: Reason) -> &'static str {
     match reason {
-        Reason::NotCompiledIn => "The capability is not included in this build.",
-        Reason::PlatformUnsupported => "The platform does not support the capability.",
-        Reason::MandatorySecurity => "The capability is mandatory and cannot be turned off.",
-        Reason::SafeMode => "Safe mode turned the capability off.",
-        Reason::ExperimentGated => "The capability is experimental and no experiment enabled it.",
-        Reason::UserDisabled => "The user turned the capability off.",
-        Reason::UserEnabled => "The user turned the capability on.",
-        Reason::DependencyUnmet => "A required capability is not available.",
-        Reason::QuarantinedAfterFailure => {
-            "The capability was quarantined after repeated failures."
-        }
-        Reason::DefaultAvailable => "The capability is available by default.",
+        Reason::NotCompiledIn => "CAP_REASON_NOT_COMPILED_IN",
+        Reason::PlatformUnsupported => "CAP_REASON_PLATFORM_UNSUPPORTED",
+        Reason::MandatorySecurity => "CAP_REASON_MANDATORY_SECURITY",
+        Reason::SafeMode => "CAP_REASON_SAFE_MODE",
+        Reason::ExperimentGated => "CAP_REASON_EXPERIMENT_GATED",
+        Reason::UserDisabled => "CAP_REASON_USER_DISABLED",
+        Reason::UserEnabled => "CAP_REASON_USER_ENABLED",
+        Reason::DependencyUnmet => "CAP_REASON_DEPENDENCY_UNMET",
+        Reason::QuarantinedAfterFailure => "CAP_REASON_QUARANTINED_AFTER_FAILURE",
+        Reason::DefaultAvailable => "CAP_REASON_DEFAULT_AVAILABLE",
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Reason, reason_message};
+    use super::{Reason, reason_code};
 
-    const ALL_REASONS: [Reason; 10] = [
-        Reason::NotCompiledIn,
-        Reason::PlatformUnsupported,
-        Reason::MandatorySecurity,
-        Reason::SafeMode,
-        Reason::ExperimentGated,
-        Reason::UserDisabled,
-        Reason::UserEnabled,
-        Reason::DependencyUnmet,
-        Reason::QuarantinedAfterFailure,
-        Reason::DefaultAvailable,
+    const CODES: [(Reason, &str); 10] = [
+        (Reason::NotCompiledIn, "CAP_REASON_NOT_COMPILED_IN"),
+        (
+            Reason::PlatformUnsupported,
+            "CAP_REASON_PLATFORM_UNSUPPORTED",
+        ),
+        (Reason::MandatorySecurity, "CAP_REASON_MANDATORY_SECURITY"),
+        (Reason::SafeMode, "CAP_REASON_SAFE_MODE"),
+        (Reason::ExperimentGated, "CAP_REASON_EXPERIMENT_GATED"),
+        (Reason::UserDisabled, "CAP_REASON_USER_DISABLED"),
+        (Reason::UserEnabled, "CAP_REASON_USER_ENABLED"),
+        (Reason::DependencyUnmet, "CAP_REASON_DEPENDENCY_UNMET"),
+        (
+            Reason::QuarantinedAfterFailure,
+            "CAP_REASON_QUARANTINED_AFTER_FAILURE",
+        ),
+        (Reason::DefaultAvailable, "CAP_REASON_DEFAULT_AVAILABLE"),
     ];
 
     #[test]
-    fn every_reason_has_a_non_empty_message() {
-        for reason in ALL_REASONS {
-            assert!(!reason_message(reason).is_empty());
+    fn every_reason_maps_to_its_stable_code() {
+        for (reason, code) in CODES {
+            assert_eq!(reason_code(reason), code);
         }
     }
 }

@@ -3,7 +3,7 @@
 // @created Diego Martín Lafuente <meerita@icloud.com>
 
 //! Asserts the cross-cutting invariants of the assembled system: every state is
-//! explainable through enum fields and a derived message, an unavailable
+//! explainable through enum fields and a stable reason code, an unavailable
 //! capability never carries a runtime lifecycle, and the downward engine-policy
 //! snapshot matches the resolved availability of every engine capability.
 
@@ -12,7 +12,7 @@ use panther_browser::bootstrap;
 use purr_embedding::WEBGPU;
 
 #[test]
-fn an_unavailable_capability_reports_its_reason_authority_and_message() {
+fn an_unavailable_capability_reports_its_reason_authority_and_code() {
     let result = bootstrap().expect("the built-in catalogue should build");
 
     let report = result
@@ -22,7 +22,7 @@ fn an_unavailable_capability_reports_its_reason_authority_and_message() {
     assert_eq!(report.availability(), Availability::Unsupported);
     assert_eq!(report.reason(), Reason::PlatformUnsupported);
     assert_eq!(report.authority(), DecidingAuthority::PlatformSupport);
-    assert!(!report.message().is_empty());
+    assert_eq!(report.reason_code(), "CAP_REASON_PLATFORM_UNSUPPORTED");
 }
 
 #[test]

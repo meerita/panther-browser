@@ -584,7 +584,7 @@ mod tests {
         assert_eq!(report.authority(), DecidingAuthority::UserPreference);
         assert_eq!(report.lifecycle(), Some(Lifecycle::Active));
         assert!(report.unmet_dependencies().is_empty());
-        assert!(!report.message().is_empty());
+        assert_eq!(report.reason_code(), "CAP_REASON_DEFAULT_AVAILABLE");
     }
 
     #[test]

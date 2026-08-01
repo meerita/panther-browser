@@ -1,0 +1,33 @@
+# @file products/panther/localization/Cargo.toml
+# @description Declares the Panther localization package.
+# @created Diego Martín Lafuente <meerita@icloud.com>
+
+[package]
+name = "panther-localization"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+capability-system = { workspace = true }
+fixed_decimal = { workspace = true }
+fluent = { workspace = true }
+fluent-pseudo = { workspace = true }
+fluent-syntax = { workspace = true }
+i18n-embed = { workspace = true }
+i18n-embed-fl = { workspace = true }
+icu = { workspace = true }
+icu_locale = { workspace = true }
+locale = { workspace = true }
+rust-embed = { workspace = true }
+sys-locale = { workspace = true }
+thiserror = { workspace = true }
+unic-langid = { workspace = true }
+
+[dev-dependencies]
+fluent = { workspace = true }
+locale = { workspace = true }
