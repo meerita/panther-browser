@@ -30,8 +30,12 @@ mod active_locale_state;
 mod active_locales;
 #[path = "baked-resource-provider.rs"]
 mod baked_resource_provider;
+#[path = "bidi-spoof.rs"]
+mod bidi_spoof;
 #[path = "capability-reason-adapter.rs"]
 mod capability_reason_adapter;
+#[path = "directional-icon.rs"]
+mod directional_icon;
 #[path = "embedded-localizations.rs"]
 mod embedded_localizations;
 #[path = "formatter-cache.rs"]
@@ -48,6 +52,8 @@ mod locale_resolver;
 mod localization_error;
 #[path = "localized-message.rs"]
 mod localized_message;
+#[path = "logical-layout.rs"]
+mod logical_layout;
 #[path = "message-adapter.rs"]
 mod message_adapter;
 #[path = "message-arguments.rs"]
@@ -68,6 +74,8 @@ mod system_locales;
 pub use active_locale_state::ActiveLocaleState;
 pub use active_locales::ActiveLocales;
 pub use baked_resource_provider::BakedResourceProvider;
+pub use bidi_spoof::{contains_bidi_control, neutralize_bidi_controls};
+pub use directional_icon::IconDirectionality;
 pub use formatter_cache::FormatterCache;
 pub use locale_broadcast::{LocaleBroadcast, LocaleChangeListener};
 pub use locale_generation::LocaleGeneration;
@@ -75,6 +83,7 @@ pub use locale_request::LocaleRequest;
 pub use locale_resolver::LocaleResolver;
 pub use localization_error::LocalizationError;
 pub use localized_message::LocalizedMessage;
+pub use logical_layout::{LogicalEdge, PhysicalSide};
 pub use message_adapter::MessageAdapter;
 pub use message_arguments::{MessageArgument, MessageArguments};
 pub use message_catalog::MessageCatalog;

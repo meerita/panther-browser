@@ -98,6 +98,23 @@ mod tests {
     }
 
     #[test]
+    fn direction_is_right_to_left_for_arabic_and_left_to_right_for_english_and_japanese() {
+        let arabic = Locale::parse("ar").expect("valid identifier");
+        let english = Locale::parse("en").expect("valid identifier");
+        let japanese = Locale::parse("ja").expect("valid identifier");
+
+        let generation = LocaleGeneration::new(1);
+        let arabic_message = LocalizedMessage::resolved("نص".to_owned(), arabic, generation);
+        let english_message = LocalizedMessage::resolved("text".to_owned(), english, generation);
+        let japanese_message =
+            LocalizedMessage::resolved("テキスト".to_owned(), japanese, generation);
+
+        assert_eq!(arabic_message.direction(), TextDirection::RightToLeft);
+        assert_eq!(english_message.direction(), TextDirection::LeftToRight);
+        assert_eq!(japanese_message.direction(), TextDirection::LeftToRight);
+    }
+
+    #[test]
     fn verbatim_escape_hatch_is_detached() {
         let locale = Locale::parse("en").expect("valid identifier");
 

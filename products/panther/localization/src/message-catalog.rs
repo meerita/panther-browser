@@ -237,6 +237,28 @@ mod tests {
     }
 
     #[test]
+    fn interpolated_argument_is_wrapped_in_bidi_isolates() {
+        let catalog = MessageCatalog::load();
+        let message = catalog.permission_camera_title("example.com");
+
+        assert!(message.text().contains("\u{2068}example.com\u{2069}"));
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn interpolated_argument_stays_isolated_in_a_right_to_left_message() {
+        use locale::TextDirection;
+
+        use crate::pseudolocale::Pseudolocale;
+
+        let catalog = MessageCatalog::pseudolocalized(Pseudolocale::BidiMirrored);
+        let message = catalog.permission_camera_title("example.com");
+
+        assert_eq!(message.direction(), TextDirection::RightToLeft);
+        assert!(message.text().contains("\u{2068}example.com\u{2069}"));
+    }
+
+    #[test]
     fn missing_key_falls_back_without_crashing() {
         let catalog = MessageCatalog::load();
         assert_eq!(catalog.message("does-not-exist").text(), "does-not-exist");
