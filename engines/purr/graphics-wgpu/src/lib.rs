@@ -10,6 +10,8 @@
 //! internal types. The public surface exposes `WgpuBackend` and nothing from
 //! `wgpu`.
 
+#[path = "render-pipelines.rs"]
+mod render_pipelines;
 #[path = "wgpu-backend.rs"]
 mod wgpu_backend;
 
