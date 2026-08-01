@@ -10,6 +10,7 @@ use i18n_embed::LanguageLoader;
 use i18n_embed::fluent::FluentLanguageLoader;
 use i18n_embed_fl::fl;
 use locale::Locale;
+use unic_langid::LanguageIdentifier;
 
 use crate::baked_resource_provider::BakedResourceProvider;
 use crate::embedded_localizations::EmbeddedLocalizations;
@@ -54,31 +55,36 @@ impl MessageCatalog {
     /// valid Fluent is dropped, the loader tolerates malformed content, and the
     /// reference locale always remains, so construction never crashes.
     pub fn load() -> Self {
-        let reference = Locale::parse(REFERENCE).expect("the reference locale is valid");
-        let fallback = locale::to_language_identifier(&reference);
-
-        let loader = FluentLanguageLoader::new(DOMAIN, fallback.clone());
-        loader.set_use_isolating(true);
-
-        let provider = BakedResourceProvider;
-        let mut languages = Vec::new();
-        for candidate in provider.available_locales() {
-            match provider.load(&candidate, RESOURCE_FILE) {
-                Ok(bytes) if validate_ftl(bytes.as_ref()).is_ok() => {
-                    languages.push(locale::to_language_identifier(&candidate));
-                }
-                _ => {}
-            }
-        }
-        if languages.is_empty() {
-            languages.push(fallback);
-        }
-
-        let _ = loader.load_languages(&EmbeddedLocalizations, &languages);
+        let reference = reference_locale();
+        let languages = validated_available_languages();
+        let loader = new_loader(&languages);
 
         Self {
             loader: Arc::new(loader),
             reference,
+            generation: LocaleGeneration::FIRST,
+        }
+    }
+
+    /// Loads the reference catalogue transformed into a development pseudolocale.
+    ///
+    /// A pseudolocale is a development instrument, not a translation. It loads
+    /// only the `en` reference catalogue and applies the pseudolocale transform
+    /// through the Fluent bundle hook, so the accented, expanded, or mirrored
+    /// text runs through the same resolution and bounding path as a real locale.
+    /// The catalog stamps the pseudolocale identity, so a mirrored pseudolocale
+    /// carries its right-to-left direction. This constructor is compiled only
+    /// with debug assertions, so a release build cannot build a pseudolocale.
+    #[cfg(debug_assertions)]
+    pub fn pseudolocalized(pseudolocale: crate::pseudolocale::Pseudolocale) -> Self {
+        let languages = vec![locale::to_language_identifier(&reference_locale())];
+        let loader = new_loader(&languages);
+        let transform = pseudolocale.transform();
+        loader.with_bundles_mut(|bundle| bundle.set_transform(Some(transform)));
+
+        Self {
+            loader: Arc::new(loader),
+            reference: pseudolocale.locale(),
             generation: LocaleGeneration::FIRST,
         }
     }
@@ -170,11 +176,50 @@ impl MessageCatalog {
     }
 }
 
+/// Returns the reference locale and ultimate fallback.
+fn reference_locale() -> Locale {
+    Locale::parse(REFERENCE).expect("the reference locale is valid")
+}
+
+/// Builds a loader over the given catalogue languages.
+///
+/// Placeable isolation stays on so interpolated values keep bidi isolation. The
+/// reference language is always the loader fallback, so a missing key resolves
+/// against `en`.
+fn new_loader(languages: &[LanguageIdentifier]) -> FluentLanguageLoader {
+    let fallback = locale::to_language_identifier(&reference_locale());
+    let loader = FluentLanguageLoader::new(DOMAIN, fallback);
+    loader.set_use_isolating(true);
+    let _ = loader.load_languages(&EmbeddedLocalizations, languages);
+    loader
+}
+
+/// Returns the embedded catalogue languages that hold valid Fluent content.
+///
+/// A resource that is unavailable, oversized, or not valid Fluent is dropped.
+/// The reference language always remains, so the set is never empty.
+fn validated_available_languages() -> Vec<LanguageIdentifier> {
+    let provider = BakedResourceProvider;
+    let mut languages = Vec::new();
+    for candidate in provider.available_locales() {
+        match provider.load(&candidate, RESOURCE_FILE) {
+            Ok(bytes) if validate_ftl(bytes.as_ref()).is_ok() => {
+                languages.push(locale::to_language_identifier(&candidate));
+            }
+            _ => {}
+        }
+    }
+    if languages.is_empty() {
+        languages.push(locale::to_language_identifier(&reference_locale()));
+    }
+    languages
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
 
-    use super::MessageCatalog;
+    use super::{MessageCatalog, validated_available_languages};
     use crate::message_arguments::{MessageArgument, MessageArguments};
 
     #[test]
@@ -284,5 +329,44 @@ mod tests {
         let formatted = bundle.format_pattern(pattern, Some(&arguments), &mut errors);
 
         assert_eq!(formatted, "few");
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn accented_pseudolocale_expands_through_the_real_path() {
+        use crate::pseudolocale::Pseudolocale;
+
+        let english = MessageCatalog::load().window_new_tab();
+        let accented = MessageCatalog::pseudolocalized(Pseudolocale::AccentedExpanded);
+        let message = accented.window_new_tab();
+
+        assert_ne!(message.text(), english.text());
+        assert!(message.text().len() > english.text().len());
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn mirrored_pseudolocale_carries_right_to_left_direction_through_the_real_path() {
+        use locale::TextDirection;
+
+        use crate::pseudolocale::Pseudolocale;
+
+        let mirrored = MessageCatalog::pseudolocalized(Pseudolocale::BidiMirrored);
+        let message = mirrored.window_new_tab();
+
+        assert_eq!(message.locale().to_string(), "ar-XB");
+        assert_eq!(message.direction(), TextDirection::RightToLeft);
+        assert_ne!(message.text(), "New Tab");
+    }
+
+    #[test]
+    fn pseudolocales_are_absent_from_the_release_locale_set() {
+        let available: Vec<String> = validated_available_languages()
+            .iter()
+            .map(|language| language.to_string())
+            .collect();
+
+        assert!(!available.iter().any(|language| language == "en-XA"));
+        assert!(!available.iter().any(|language| language == "ar-XB"));
     }
 }

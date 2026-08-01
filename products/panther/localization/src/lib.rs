@@ -54,6 +54,8 @@ mod message_adapter;
 mod message_arguments;
 #[path = "message-catalog.rs"]
 mod message_catalog;
+#[path = "pseudolocale.rs"]
+mod pseudolocale;
 #[path = "regional-formatter.rs"]
 mod regional_formatter;
 #[path = "resource-provider.rs"]
@@ -76,6 +78,7 @@ pub use localized_message::LocalizedMessage;
 pub use message_adapter::MessageAdapter;
 pub use message_arguments::{MessageArgument, MessageArguments};
 pub use message_catalog::MessageCatalog;
+pub use pseudolocale::{Pseudolocale, development_pseudolocales};
 pub use regional_formatter::RegionalFormatter;
 pub use resource_provider::ResourceProvider;
 pub use system_locales::detect_system_locales;

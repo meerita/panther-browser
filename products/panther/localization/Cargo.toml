@@ -16,6 +16,7 @@ workspace = true
 capability-system = { workspace = true }
 fixed_decimal = { workspace = true }
 fluent = { workspace = true }
+fluent-pseudo = { workspace = true }
 fluent-syntax = { workspace = true }
 i18n-embed = { workspace = true }
 i18n-embed-fl = { workspace = true }
