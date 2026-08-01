@@ -9,15 +9,23 @@
 //! demonstration frame on redraw. It handles resize and close and returns the
 //! first failure it meets.
 //!
+//! A native surface can report a transient state right after the window appears
+//! (the drawable is outdated or the window is not yet visible). The backend maps
+//! that state to `SubmissionRejected`. The loop recovers by reconfiguring the
+//! surface and asking for another redraw, bounded by a deadline so a persistent
+//! failure still surfaces as an error.
+//!
 //! Isolation: `winit` and backend types stay inside this crate. Only the neutral
 //! window handle crosses the `purr-graphics` seam, through `WindowSurface`. The
 //! window outlives the backend, so the handle the backend borrowed stays valid
 //! across later presents.
 
+use std::time::{Duration, Instant};
+
 use purr_graphics::{
-    AlphaMode, Color, DrawCommand, Extent2d, FrameSubmission, FrameToken, MAX_TEXTURE_EXTENT,
-    PresentationTargetDescriptor, Rect, SceneGeneration, SceneId, SceneIdentity, SurfaceIdentity,
-    TextureFormatClass, WindowSurface,
+    AlphaMode, Color, DrawCommand, Extent2d, FrameSubmission, FrameToken, GraphicsError,
+    MAX_TEXTURE_EXTENT, PresentationTargetDescriptor, Rect, SceneGeneration, SceneId,
+    SceneIdentity, SurfaceIdentity, TextureFormatClass, WindowSurface,
 };
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::application::ApplicationHandler;
@@ -44,6 +52,22 @@ const CLEAR_COLOR: Color = Color::new(0.09, 0.09, 0.11, 1.0);
 /// Fill color of the demonstration rectangle.
 const RECT_COLOR: Color = Color::new(0.20, 0.55, 0.95, 1.0);
 
+/// Time a recoverable present failure may persist before it is treated as fatal.
+///
+/// A fresh surface can be transiently outdated or occluded for a few frames after
+/// the window appears. Beyond this window the failure is no longer transient.
+const PRESENT_RECOVERY_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Result of one redraw attempt.
+enum FrameOutcome {
+    /// The frame was presented. The flag reports the software backend, so the
+    /// caller can note the headless software path once.
+    Presented { software: bool },
+    /// The present failed with a recoverable surface state. The surface was
+    /// reconfigured and another redraw was requested.
+    Recovered,
+}
+
 /// Opens a window and presents a demonstration frame through the selected backend.
 ///
 /// The call blocks until the window closes. It returns the first initialization
@@ -68,17 +92,25 @@ struct Presentation {
 impl Presentation {
     /// Submits and presents the demonstration frame.
     ///
-    /// Returns whether the software backend produced the frame, so the caller can
-    /// note the headless software path once.
-    fn render(&mut self) -> Result<bool, WindowError> {
+    /// A recoverable present failure reconfigures the surface and requests another
+    /// redraw, so the caller retries on the next frame instead of failing.
+    fn render(&mut self) -> Result<FrameOutcome, WindowError> {
         let submission = demonstration_frame(self.surface, self.extent);
         self.backend
             .submit(self.surface, &submission)
             .map_err(WindowError::Backend)?;
-        self.backend
-            .present(self.surface)
-            .map_err(WindowError::Backend)?;
-        Ok(self.backend.is_software())
+
+        match self.backend.present(self.surface) {
+            Ok(()) => Ok(FrameOutcome::Presented {
+                software: self.backend.is_software(),
+            }),
+            Err(GraphicsError::SubmissionRejected) => {
+                self.reconfigure()?;
+                self.window.request_redraw();
+                Ok(FrameOutcome::Recovered)
+            }
+            Err(other) => Err(WindowError::Backend(other)),
+        }
     }
 
     /// Resizes the presentation target to a new window size.
@@ -97,6 +129,22 @@ impl Presentation {
         self.window.request_redraw();
         Ok(())
     }
+
+    /// Reconfigures the surface to the current window size.
+    ///
+    /// This clears a transient outdated surface before the next present. A zero or
+    /// over-bound size is skipped.
+    fn reconfigure(&mut self) -> Result<(), WindowError> {
+        let Some(extent) = valid_extent(self.window.inner_size()) else {
+            return Ok(());
+        };
+
+        self.backend
+            .resize_presentation_target(self.surface, extent)
+            .map_err(WindowError::Backend)?;
+        self.extent = extent;
+        Ok(())
+    }
 }
 
 /// Application state driven by the `winit` event loop.
@@ -104,6 +152,7 @@ struct WindowApplication {
     presentation: Option<Presentation>,
     error: Option<WindowError>,
     software_frame_noted: bool,
+    recovery_deadline: Option<Instant>,
 }
 
 impl WindowApplication {
@@ -112,6 +161,7 @@ impl WindowApplication {
             presentation: None,
             error: None,
             software_frame_noted: false,
+            recovery_deadline: None,
         }
     }
 
@@ -157,6 +207,24 @@ impl WindowApplication {
         });
         Ok(())
     }
+
+    /// Notes the headless software path once.
+    fn note_software_frame(&mut self, software: bool) {
+        if software && !self.software_frame_noted {
+            self.software_frame_noted = true;
+            eprintln!(
+                "panther-window: software backend produced a framebuffer; on-screen display of the software path is later work"
+            );
+        }
+    }
+
+    /// Returns whether the recovery window has elapsed, starting it on first use.
+    fn recovery_expired(&mut self, now: Instant) -> bool {
+        let deadline = *self
+            .recovery_deadline
+            .get_or_insert(now + PRESENT_RECOVERY_TIMEOUT);
+        now >= deadline
+    }
 }
 
 impl ApplicationHandler for WindowApplication {
@@ -192,12 +260,14 @@ impl ApplicationHandler for WindowApplication {
                 }
             }
             WindowEvent::RedrawRequested => match presentation.render() {
-                Ok(is_software) => {
-                    if is_software && !self.software_frame_noted {
-                        self.software_frame_noted = true;
-                        eprintln!(
-                            "panther-window: software backend produced a framebuffer; on-screen display of the software path is later work"
-                        );
+                Ok(FrameOutcome::Presented { software }) => {
+                    self.recovery_deadline = None;
+                    self.note_software_frame(software);
+                }
+                Ok(FrameOutcome::Recovered) => {
+                    if self.recovery_expired(Instant::now()) {
+                        self.error = Some(WindowError::Backend(GraphicsError::SubmissionRejected));
+                        event_loop.exit();
                     }
                 }
                 Err(error) => {
