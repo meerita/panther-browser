@@ -1,0 +1,21 @@
+# @file products/panther/window/Cargo.toml
+# @description Declares the Panther windowing seam and window integration package.
+# @created Diego Martín Lafuente <meerita@icloud.com>
+
+[package]
+name = "panther-window"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+purr-graphics.workspace = true
+purr-graphics-wgpu = { path = "../../../engines/purr/graphics-wgpu" }
+purr-graphics-software = { path = "../../../engines/purr/graphics-software" }
+winit.workspace = true
+raw-window-handle.workspace = true
+thiserror.workspace = true

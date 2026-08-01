@@ -8,6 +8,7 @@ members = [
     "apps/panther",
     "products/panther/browser",
     "products/panther/localization",
+    "products/panther/window",
     "engines/purr/embedding",
     "engines/purr/engine",
     "engines/purr/graphics",
@@ -47,6 +48,7 @@ sys-locale = "0.3"
 thiserror = "2"
 unic-langid = "0.9"
 wgpu = "30"
+winit = "0.30"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
