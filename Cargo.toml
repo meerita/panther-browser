@@ -22,10 +22,12 @@ license = "MIT"
 [workspace.dependencies]
 anyhow = "1"
 capability-system = { path = "foundation/capability-system" }
+fluent-langneg = "0.13"
 icu_locale = "2.2"
 icu_locale_core = "2.2"
 locale = { path = "foundation/locale" }
 thiserror = "2"
+unic-langid = "0.9"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

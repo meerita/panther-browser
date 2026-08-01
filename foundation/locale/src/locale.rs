@@ -50,6 +50,15 @@ impl Locale {
     pub fn as_icu(&self) -> &IcuLocale {
         &self.inner
     }
+
+    /// Wraps an identifier that is already canonical.
+    ///
+    /// The crate uses this for identifiers produced by locale fallback. Those
+    /// identifiers are already well-formed and canonical, so they bypass
+    /// parsing and canonicalization.
+    pub(crate) fn from_icu(inner: IcuLocale) -> Self {
+        Self { inner }
+    }
 }
 
 impl fmt::Display for Locale {

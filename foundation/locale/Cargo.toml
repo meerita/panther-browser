@@ -13,6 +13,8 @@ publish = false
 workspace = true
 
 [dependencies]
+fluent-langneg = { workspace = true }
 icu_locale = { workspace = true }
 icu_locale_core = { workspace = true }
 thiserror = { workspace = true }
+unic-langid = { workspace = true }
