@@ -32,5 +32,36 @@ tabs-open =
     }
 
 ## Capability reasons.
-## Placeholder namespace filled in a later phase. The capability system reports
-## typed reasons; the Panther adapter maps them to capability-reason-* keys here.
+## The capability system reports typed reasons and stable codes only. The Panther
+## adapter maps each reason to one capability-reason-* key here. The messages take
+## no arguments so no sensitive value is interpolated.
+
+# A capability is not part of this build.
+capability-reason-not-compiled-in = The capability is not included in this build.
+
+# The current platform cannot provide the capability.
+capability-reason-platform-unsupported = The platform does not support the capability.
+
+# The capability is mandatory and stays on for security.
+capability-reason-mandatory-security = The capability is mandatory and cannot be turned off.
+
+# Safe mode turned the capability off.
+capability-reason-safe-mode = Safe mode turned the capability off.
+
+# The capability is experimental and no experiment enabled it.
+capability-reason-experiment-gated = The capability is experimental and no experiment enabled it.
+
+# The user turned the capability off.
+capability-reason-user-disabled = The user turned the capability off.
+
+# The user turned the capability on.
+capability-reason-user-enabled = The user turned the capability on.
+
+# A required capability is not available.
+capability-reason-dependency-unmet = A required capability is not available.
+
+# The capability was quarantined after repeated failures.
+capability-reason-quarantined-after-failure = The capability was quarantined after repeated failures.
+
+# The capability is available by default.
+capability-reason-default-available = The capability is available by default.

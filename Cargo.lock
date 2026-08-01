@@ -822,6 +822,7 @@ dependencies = [
 name = "panther-localization"
 version = "0.1.0"
 dependencies = [
+ "capability-system",
  "fixed_decimal",
  "fluent",
  "fluent-syntax",

@@ -30,6 +30,8 @@ mod active_locale_state;
 mod active_locales;
 #[path = "baked-resource-provider.rs"]
 mod baked_resource_provider;
+#[path = "capability-reason-adapter.rs"]
+mod capability_reason_adapter;
 #[path = "embedded-localizations.rs"]
 mod embedded_localizations;
 #[path = "formatter-cache.rs"]
