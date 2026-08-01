@@ -24,9 +24,6 @@ impl LocaleGeneration {
     pub const DETACHED: Self = Self(0);
 
     /// Wraps a raw generation value produced by the resolution service.
-    ///
-    /// The resolution service that consumes this is added in a later phase.
-    #[allow(dead_code)]
     pub(crate) const fn new(value: u64) -> Self {
         Self(value)
     }

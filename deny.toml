@@ -37,6 +37,8 @@ allow-wildcard-paths = true
 # aligned from this workspace, so the older line is an accepted duplicate.
 skip = [
     { crate = "syn@2", reason = "ICU4X builds against syn 2 (zerovec derives) and syn 3 (displaydoc)" },
+    { crate = "thiserror@1", reason = "the i18n-embed embedding stack still builds against thiserror 1" },
+    { crate = "thiserror-impl@1", reason = "the i18n-embed embedding stack still builds against thiserror 1" },
 ]
 
 [sources]

@@ -14,10 +14,14 @@
 //! external packs later share one contract. The [`LocalizedMessage`] type is
 //! the only text a user interface sink accepts, which keeps raw strings out of
 //! text sinks; a typed state becomes a message through the [`MessageAdapter`]
-//! pattern. Later phases add catalogues, formatting, resolution, and switching.
+//! pattern. The [`MessageCatalog`] parses the baked Fluent catalogues once into
+//! shared bundles and resolves seed keys into localized text. Later phases add
+//! formatting, resolution, and runtime switching.
 
 #[path = "baked-resource-provider.rs"]
 mod baked_resource_provider;
+#[path = "embedded-localizations.rs"]
+mod embedded_localizations;
 #[path = "locale-generation.rs"]
 mod locale_generation;
 #[path = "localization-error.rs"]
@@ -28,8 +32,12 @@ mod localized_message;
 mod message_adapter;
 #[path = "message-arguments.rs"]
 mod message_arguments;
+#[path = "message-catalog.rs"]
+mod message_catalog;
 #[path = "resource-provider.rs"]
 mod resource_provider;
+#[path = "resource-validation.rs"]
+mod resource_validation;
 
 pub use baked_resource_provider::BakedResourceProvider;
 pub use locale_generation::LocaleGeneration;
@@ -37,4 +45,5 @@ pub use localization_error::LocalizationError;
 pub use localized_message::LocalizedMessage;
 pub use message_adapter::MessageAdapter;
 pub use message_arguments::{MessageArgument, MessageArguments};
+pub use message_catalog::MessageCatalog;
 pub use resource_provider::ResourceProvider;

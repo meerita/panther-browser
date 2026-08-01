@@ -13,5 +13,11 @@ publish = false
 workspace = true
 
 [dependencies]
+fluent = { workspace = true }
+fluent-syntax = { workspace = true }
+i18n-embed = { workspace = true }
+i18n-embed-fl = { workspace = true }
 locale = { workspace = true }
+rust-embed = { workspace = true }
 thiserror = { workspace = true }
+unic-langid = { workspace = true }

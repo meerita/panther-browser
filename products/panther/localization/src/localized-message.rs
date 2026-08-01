@@ -28,9 +28,8 @@ pub struct LocalizedMessage {
 impl LocalizedMessage {
     /// Builds a message from text the localization path resolved.
     ///
-    /// The localization path (message bundles and formatting) is added in later
-    /// phases and constructs every resolved message through this constructor.
-    #[allow(dead_code)]
+    /// The localization path (message bundles and formatting) constructs every
+    /// resolved message through this constructor.
     pub(crate) fn resolved(text: String, locale: Locale, generation: LocaleGeneration) -> Self {
         let direction = locale.direction();
         Self {
