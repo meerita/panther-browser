@@ -18,6 +18,8 @@ mod descriptor;
 mod graphics_error;
 #[path = "identity.rs"]
 mod identity;
+#[path = "submission.rs"]
+mod submission;
 
 pub use descriptor::{
     AlphaMode, BufferDescriptor, BufferUsage, Color, ColorSpace, Extent2d, MAX_TEXTURE_EXTENT,
@@ -29,4 +31,7 @@ pub use identity::{
     DeviceGeneration, FrameToken, GpuResourceIdentity, ProducerNamespace, ResourceGeneration,
     ResourceId, ResourceKind, SceneGeneration, SceneId, SceneIdentity, SurfaceGeneration,
     SurfaceId, SurfaceIdentity,
+};
+pub use submission::{
+    DrawCommand, FrameSubmission, MAX_DRAW_COMMANDS, MAX_RESOURCE_UPLOADS, Rect, ResourceUpload,
 };
