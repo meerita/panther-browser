@@ -31,6 +31,13 @@ wildcards = "deny"
 # Internal workspace crates depend on each other by path without a version, which
 # cargo-deny reports as a wildcard. Registry wildcards stay denied.
 allow-wildcard-paths = true
+# The ICU4X stack pulls two major lines of the `syn` proc-macro crate: its
+# `zerovec` derives build against `syn` 2 while `displaydoc` builds against
+# `syn` 3. Both are build-time dependencies internal to ICU4X and cannot be
+# aligned from this workspace, so the older line is an accepted duplicate.
+skip = [
+    { crate = "syn@2", reason = "ICU4X builds against syn 2 (zerovec derives) and syn 3 (displaydoc)" },
+]
 
 [sources]
 unknown-registry = "deny"
