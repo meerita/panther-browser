@@ -14,5 +14,12 @@
 
 #[path = "graphics-error.rs"]
 mod graphics_error;
+#[path = "identity.rs"]
+mod identity;
 
 pub use graphics_error::GraphicsError;
+pub use identity::{
+    DeviceGeneration, FrameToken, GpuResourceIdentity, ProducerNamespace, ResourceGeneration,
+    ResourceId, ResourceKind, SceneGeneration, SceneId, SceneIdentity, SurfaceGeneration,
+    SurfaceId, SurfaceIdentity,
+};
