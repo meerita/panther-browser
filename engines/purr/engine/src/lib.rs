@@ -20,7 +20,8 @@ mod mock_providers;
 mod platform_support;
 
 pub use capability_declarations::{
-    AUTHOR_STYLES, SERVICE_WORKERS, USER_AGENT_STYLES, WEBGPU, engine_capabilities,
+    AUTHOR_STYLES, GPU_ACCELERATION, SERVICE_WORKERS, USER_AGENT_STYLES, WEBGPU,
+    engine_capabilities,
 };
 pub use mock_providers::{SucceedingProvider, WebGpuProvider};
 pub use platform_support::platform_supports;

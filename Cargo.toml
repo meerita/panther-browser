@@ -8,8 +8,12 @@ members = [
     "apps/panther",
     "products/panther/browser",
     "products/panther/localization",
+    "products/panther/window",
     "engines/purr/embedding",
     "engines/purr/engine",
+    "engines/purr/graphics",
+    "engines/purr/graphics-software",
+    "engines/purr/graphics-wgpu",
     "foundation/capability-system",
     "foundation/locale",
     "tools/localization-check",
@@ -36,10 +40,15 @@ icu_locale = "2.2"
 icu_locale_core = "2.2"
 locale = { path = "foundation/locale" }
 panther-localization = { path = "products/panther/localization" }
+pollster = "0.4"
+purr-graphics = { path = "engines/purr/graphics" }
+raw-window-handle = "0.6"
 rust-embed = "8"
 sys-locale = "0.3"
 thiserror = "2"
 unic-langid = "0.9"
+wgpu = "30"
+winit = "0.30"
 
 [workspace.lints.rust]
 unsafe_code = "deny"

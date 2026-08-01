@@ -1,0 +1,17 @@
+# @file engines/purr/graphics/Cargo.toml
+# @description Declares the Panther-owned engine graphics interface package.
+# @created Diego Martín Lafuente <meerita@icloud.com>
+
+[package]
+name = "purr-graphics"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+raw-window-handle.workspace = true
+thiserror.workspace = true

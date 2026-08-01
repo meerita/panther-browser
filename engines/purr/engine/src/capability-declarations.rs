@@ -21,9 +21,15 @@ pub const WEBGPU: CapabilityId = CapabilityId::new("purr.webgpu");
 /// so its provider is normally not invoked.
 pub const SERVICE_WORKERS: CapabilityId = CapabilityId::new("purr.service-workers");
 
+/// Optional hardware graphics acceleration. This toggles the acceleration path,
+/// not rendering itself. When it resolves to disabled or the hardware is
+/// unavailable, the software backend still renders. It is distinct from
+/// `purr.webgpu`, which exposes the WebGPU web platform surface.
+pub const GPU_ACCELERATION: CapabilityId = CapabilityId::new("purr.gpu-acceleration");
+
 const NO_DEPENDENCIES: &[CapabilityId] = &[];
 
-static ENGINE_CAPABILITIES: [CapabilityDefinition; 4] = [
+static ENGINE_CAPABILITIES: [CapabilityDefinition; 5] = [
     CapabilityDefinition {
         id: USER_AGENT_STYLES,
         owner: Owner::Purr,
@@ -60,6 +66,15 @@ static ENGINE_CAPABILITIES: [CapabilityDefinition; 4] = [
         is_mandatory: false,
         is_built: true,
     },
+    CapabilityDefinition {
+        id: GPU_ACCELERATION,
+        owner: Owner::Purr,
+        category: Category::EngineService,
+        maturity: Maturity::Stable,
+        dependencies: NO_DEPENDENCIES,
+        is_mandatory: false,
+        is_built: true,
+    },
 ];
 
 /// Returns the capabilities the Purr engine declares.
@@ -72,8 +87,11 @@ pub fn engine_capabilities() -> &'static [CapabilityDefinition] {
 
 #[cfg(test)]
 mod tests {
-    use super::{AUTHOR_STYLES, SERVICE_WORKERS, USER_AGENT_STYLES, WEBGPU, engine_capabilities};
-    use capability_system::{CapabilityDefinition, CapabilityId, Maturity, Owner};
+    use super::{
+        AUTHOR_STYLES, GPU_ACCELERATION, SERVICE_WORKERS, USER_AGENT_STYLES, WEBGPU,
+        engine_capabilities,
+    };
+    use capability_system::{CapabilityDefinition, CapabilityId, Category, Maturity, Owner};
 
     fn definition(id: CapabilityId) -> &'static CapabilityDefinition {
         engine_capabilities()
@@ -84,7 +102,7 @@ mod tests {
 
     #[test]
     fn every_definition_is_owned_by_purr_with_a_matching_namespace() {
-        assert_eq!(engine_capabilities().len(), 4);
+        assert_eq!(engine_capabilities().len(), 5);
         for definition in engine_capabilities() {
             assert_eq!(definition.owner, Owner::Purr);
             assert_eq!(definition.id.owner_namespace(), "purr");
@@ -108,5 +126,14 @@ mod tests {
 
         assert_eq!(definition(SERVICE_WORKERS).maturity, Maturity::Stable);
         assert!(!definition(SERVICE_WORKERS).is_mandatory);
+    }
+
+    #[test]
+    fn gpu_acceleration_is_a_stable_optional_engine_service_owned_by_purr() {
+        let gpu_acceleration = definition(GPU_ACCELERATION);
+        assert_eq!(gpu_acceleration.owner, Owner::Purr);
+        assert_eq!(gpu_acceleration.category, Category::EngineService);
+        assert_eq!(gpu_acceleration.maturity, Maturity::Stable);
+        assert!(!gpu_acceleration.is_mandatory);
     }
 }

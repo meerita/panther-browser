@@ -41,7 +41,7 @@ fn the_downward_snapshot_matches_the_resolved_engine_availability() {
     let result = bootstrap().expect("the built-in catalogue should build");
     let snapshot = result.engine_policy.diagnostics();
 
-    assert_eq!(snapshot.entries().len(), 4);
+    assert_eq!(snapshot.entries().len(), 5);
     for entry in snapshot.entries() {
         assert_eq!(entry.id().owner_namespace(), "purr");
 

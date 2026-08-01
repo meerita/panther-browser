@@ -1,0 +1,19 @@
+# @file engines/purr/graphics-software/Cargo.toml
+# @description Declares the software (CPU) backend adapter package.
+# @created Diego Martín Lafuente <meerita@icloud.com>
+
+[package]
+name = "purr-graphics-software"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+purr-graphics.workspace = true
+
+[dev-dependencies]
+raw-window-handle.workspace = true

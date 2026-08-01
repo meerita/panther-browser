@@ -40,6 +40,15 @@ skip = [
     { crate = "thiserror@1", reason = "the i18n-embed embedding stack still builds against thiserror 1" },
     { crate = "thiserror-impl@1", reason = "the i18n-embed embedding stack still builds against thiserror 1" },
 ]
+# The wgpu and winit stacks pull large platform-specific trees (Apple `objc2`,
+# Windows `windows-sys`, Linux `rustix`, and shared utility crates) that pin
+# several transitive crates to two major lines. The duplication lives entirely
+# inside these vendored trees and cannot be aligned from this workspace, so the
+# whole subtree is an accepted source of duplicates.
+skip-tree = [
+    { crate = "wgpu", reason = "the wgpu graphics backend vendors a platform tree with duplicate transitive crates" },
+    { crate = "winit", reason = "the winit windowing backend vendors a platform tree with duplicate transitive crates" },
+]
 
 [sources]
 unknown-registry = "deny"

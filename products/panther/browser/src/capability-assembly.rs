@@ -121,14 +121,14 @@ mod tests {
     }
 
     #[test]
-    fn bootstrap_builds_the_full_catalogue_and_reports_seven_capabilities() {
+    fn bootstrap_builds_the_full_catalogue_and_reports_eight_capabilities() {
         let result = bootstrap().expect("the built-in catalogue should build");
 
         let reports = result.reports();
-        assert_eq!(reports.len(), 7);
+        assert_eq!(reports.len(), 8);
 
         let purr_entries = result.engine_policy.diagnostics().entries().len();
-        assert_eq!(purr_entries, 4);
+        assert_eq!(purr_entries, 5);
     }
 
     #[test]
