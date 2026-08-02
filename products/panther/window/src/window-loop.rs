@@ -32,9 +32,10 @@ use purr_embedding::{
     DocumentFrame, DocumentHandle, DocumentSession, ViewportGeometry, m2_demonstration_fixture,
 };
 use purr_graphics::{
-    AlphaMode, Extent2d, FrameSubmission, FrameToken, GraphicsError, MAX_TEXTURE_EXTENT,
-    PresentationTargetDescriptor, Rect, SceneGeneration, SceneId, SceneIdentity, SurfaceIdentity,
-    TextureFormatClass, WindowDisplayHandle, WindowSurface,
+    AlphaMode, DrawCommand, Extent2d, FrameSubmission, FrameToken, GpuResourceIdentity,
+    GraphicsError, MAX_TEXTURE_EXTENT, PresentationTargetDescriptor, Rect, SceneGeneration,
+    SceneId, SceneIdentity, SurfaceIdentity, TextureDescriptor, TextureFormatClass,
+    WindowDisplayHandle, WindowSurface,
 };
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::application::ApplicationHandler;
@@ -107,6 +108,7 @@ struct Presentation {
     session: DocumentSession,
     document: DocumentHandle,
     document_frame: Option<DocumentFrame>,
+    textures: Vec<(TextureDescriptor, GpuResourceIdentity)>,
 }
 
 impl Presentation {
@@ -117,7 +119,10 @@ impl Presentation {
     /// reconfigures the surface and requests another redraw, so the caller retries
     /// on the next frame instead of failing.
     fn render(&mut self) -> Result<FrameOutcome, WindowError> {
-        let content = self.composite_content();
+        let content = match self.composite_content() {
+            Some(content) => Some(self.realize_content(content)?),
+            None => None,
+        };
         let submission = shell_frame(&self.shell, self.surface, self.extent, content);
         self.backend
             .submit(self.surface, &submission)
@@ -183,6 +188,66 @@ impl Presentation {
     fn composite_content(&self) -> Option<CompositedDocument> {
         let frame = self.document_frame.as_ref()?;
         composite_document(frame, self.viewport_rect(), self.document.generation())
+    }
+
+    /// Realizes the document uploads on the backend and remaps their identities.
+    ///
+    /// The seam hands back a document-local display list, not a texture (D1). Each
+    /// engine upload names a synthetic resource identity in the engine namespace,
+    /// but the backend draws only from a texture it allocated. This allocates one
+    /// texture per upload descriptor, rewrites the upload to the allocated
+    /// identity, and rewrites every glyph quad that referenced the engine identity,
+    /// so the submission names only live backend resources. Allocation is cached by
+    /// descriptor: the glyph atlas is stable across renders and resizes, so the M2
+    /// fixture allocates one atlas texture for the life of the window.
+    fn realize_content(
+        &mut self,
+        content: CompositedDocument,
+    ) -> Result<CompositedDocument, WindowError> {
+        let CompositedDocument {
+            mut commands,
+            uploads,
+        } = content;
+
+        let mut realized = Vec::with_capacity(uploads.len());
+        for mut upload in uploads {
+            let engine_resource = upload.resource;
+            let backend_resource = self.ensure_texture(&upload.descriptor)?;
+            remap_texture(&mut commands, engine_resource, backend_resource);
+            upload.resource = backend_resource;
+            realized.push(upload);
+        }
+
+        Ok(CompositedDocument {
+            commands,
+            uploads: realized,
+        })
+    }
+
+    /// Returns a live backend texture for the descriptor, allocating on first use.
+    ///
+    /// A cached texture with an equal descriptor is reused, so a repeated render or
+    /// a resize does not allocate again. The backend exposes no free, so the cache
+    /// is the allocation bound: it grows only when a genuinely new descriptor
+    /// appears, which the stable M2 atlas never does.
+    fn ensure_texture(
+        &mut self,
+        descriptor: &TextureDescriptor,
+    ) -> Result<GpuResourceIdentity, WindowError> {
+        if let Some((_, resource)) = self
+            .textures
+            .iter()
+            .find(|(cached, _)| cached == descriptor)
+        {
+            return Ok(*resource);
+        }
+
+        let resource = self
+            .backend
+            .allocate_texture(descriptor)
+            .map_err(WindowError::Backend)?;
+        self.textures.push((descriptor.clone(), resource));
+        Ok(resource)
     }
 
     /// Current viewport rectangle in surface pixel space.
@@ -309,6 +374,7 @@ impl WindowApplication {
             session,
             document,
             document_frame: None,
+            textures: Vec::new(),
         };
         presentation.produce_document()?;
 
@@ -385,6 +451,22 @@ impl ApplicationHandler for WindowApplication {
                 }
             },
             _ => {}
+        }
+    }
+}
+
+/// Repoints every glyph quad from the engine resource identity to the backend one.
+///
+/// The paint stage tags each glyph quad with the engine-namespace atlas identity;
+/// once the atlas is allocated on the backend, those quads must sample the
+/// allocated texture instead. A quad that names a different resource is left
+/// unchanged, so several uploads remap independently.
+fn remap_texture(commands: &mut [DrawCommand], from: GpuResourceIdentity, to: GpuResourceIdentity) {
+    for command in commands.iter_mut() {
+        if let DrawCommand::TexturedQuad { texture, .. } = command
+            && *texture == from
+        {
+            *texture = to;
         }
     }
 }
