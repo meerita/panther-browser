@@ -9,10 +9,11 @@
 //! inputs produce identical framebuffer bytes on every platform, so it drives the
 //! pixel tests and provides the GPU-less fallback path.
 //!
-//! Isolation rule: this crate depends only on `purr-graphics`. It names no
-//! `wgpu`, `winit`, or native graphics type. The public surface exposes
-//! `SoftwareBackend` and speaks only in Panther identities, descriptors, and
-//! `GraphicsError`.
+//! Isolation rule: this crate depends on `purr-graphics` and, for the on-screen
+//! present only, on `softbuffer`. It names no `wgpu`, `winit`, or native window
+//! type; `softbuffer` reaches the window through the neutral seam handle. The
+//! public surface exposes `SoftwareBackend` and speaks only in Panther
+//! identities, descriptors, and `GraphicsError`.
 
 #[path = "software-backend.rs"]
 mod software_backend;

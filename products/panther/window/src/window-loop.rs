@@ -24,13 +24,14 @@
 //! across later presents.
 
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use panther_shell::{KeyInput, PointerPosition, Shell};
 use purr_graphics::{
     AlphaMode, Extent2d, FrameSubmission, FrameToken, GraphicsError, MAX_TEXTURE_EXTENT,
     PresentationTargetDescriptor, SceneGeneration, SceneId, SceneIdentity, SurfaceIdentity,
-    TextureFormatClass, WindowSurface,
+    TextureFormatClass, WindowDisplayHandle, WindowSurface,
 };
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::application::ApplicationHandler;
@@ -60,9 +61,8 @@ const PRESENT_RECOVERY_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Result of one redraw attempt.
 enum FrameOutcome {
-    /// The frame was presented. The flag reports the software backend, so the
-    /// caller can note the headless software path once.
-    Presented { software: bool },
+    /// The frame was submitted and presented.
+    Presented,
     /// The present failed with a recoverable surface state. The surface was
     /// reconfigured and another redraw was requested.
     Recovered,
@@ -82,8 +82,12 @@ pub fn run_window() -> Result<(), WindowError> {
 }
 
 /// One live window bound to a backend, a presentation target, and the shell.
+///
+/// The window is shared through an `Rc` so the software backend can retain a
+/// clone of the neutral handle for its on-screen present while the loop keeps its
+/// own reference for redraw and resize.
 struct Presentation {
-    window: Window,
+    window: Rc<Window>,
     backend: ActiveBackend,
     surface: SurfaceIdentity,
     extent: Extent2d,
@@ -107,9 +111,7 @@ impl Presentation {
         match self.backend.present(self.surface) {
             Ok(()) => {
                 self.shell.clear_dirty();
-                Ok(FrameOutcome::Presented {
-                    software: self.backend.is_software(),
-                })
+                Ok(FrameOutcome::Presented)
             }
             Err(GraphicsError::SubmissionRejected) => {
                 self.reconfigure()?;
@@ -193,7 +195,6 @@ impl Presentation {
 struct WindowApplication {
     presentation: Option<Presentation>,
     error: Option<WindowError>,
-    software_frame_noted: bool,
     recovery_deadline: Option<Instant>,
 }
 
@@ -202,7 +203,6 @@ impl WindowApplication {
         Self {
             presentation: None,
             error: None,
-            software_frame_noted: false,
             recovery_deadline: None,
         }
     }
@@ -220,9 +220,11 @@ impl WindowApplication {
         let attributes = Window::default_attributes()
             .with_title(WINDOW_TITLE)
             .with_inner_size(LogicalSize::new(INITIAL_WIDTH, INITIAL_HEIGHT));
-        let window = event_loop
-            .create_window(attributes)
-            .map_err(WindowError::Window)?;
+        let window = Rc::new(
+            event_loop
+                .create_window(attributes)
+                .map_err(WindowError::Window)?,
+        );
 
         ensure_handles(&window)?;
 
@@ -235,8 +237,9 @@ impl WindowApplication {
             alpha_mode: AlphaMode::Opaque,
         };
 
+        let handle: Rc<dyn WindowDisplayHandle> = window.clone();
         let surface = backend
-            .create_presentation_target(WindowSurface::new(&window, extent), descriptor)
+            .create_presentation_target(WindowSurface::new_owned(handle, extent), descriptor)
             .map_err(WindowError::Backend)?;
 
         window.request_redraw();
@@ -250,16 +253,6 @@ impl WindowApplication {
             last_cursor: None,
         });
         Ok(())
-    }
-
-    /// Notes the headless software path once.
-    fn note_software_frame(&mut self, software: bool) {
-        if software && !self.software_frame_noted {
-            self.software_frame_noted = true;
-            eprintln!(
-                "panther-window: software backend produced a framebuffer; on-screen display of the software path is later work"
-            );
-        }
     }
 
     /// Returns whether the recovery window has elapsed, starting it on first use.
@@ -316,9 +309,8 @@ impl ApplicationHandler for WindowApplication {
                 presentation.key_pressed(to_key_input(key.physical_key));
             }
             WindowEvent::RedrawRequested => match presentation.render() {
-                Ok(FrameOutcome::Presented { software }) => {
+                Ok(FrameOutcome::Presented) => {
                     self.recovery_deadline = None;
-                    self.note_software_frame(software);
                 }
                 Ok(FrameOutcome::Recovered) => {
                     if self.recovery_expired(Instant::now()) {

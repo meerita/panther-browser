@@ -10,14 +10,22 @@
 //! and software) implement this one contract behind the interface.
 //!
 //! `WindowSurface` is the only place a native window reaches the interface. It
-//! borrows a handle through the neutral `raw-window-handle` traits, so the
-//! interface names no `wgpu` or platform window type. The wrapper borrows the
-//! handle; it never owns or stores a backend type.
+//! carries a handle through the neutral `raw-window-handle` traits, so the
+//! interface names no `wgpu` or platform window type. The wrapper either borrows
+//! the handle for the duration of one call, or holds a shared owned handle a
+//! backend can retain past the call; it never owns or stores a backend type.
+//!
+//! A backend that presents on a later frame (the software backend blits through
+//! `softbuffer`) needs a handle that outlives the creating call. The owned form
+//! carries a shared, cloneable neutral handle for that purpose. The handle stays
+//! backend-neutral: it is only the `raw-window-handle` traits behind an `Rc`.
 //!
 //! The runtime methods take `&self` or `&mut self` and use no generics, so a
 //! backend is reachable through a trait object where a later phase needs runtime
 //! selection. The window handle stays object-safe because `WindowSurface` is a
 //! concrete type; its generic constructor keeps the generic off the trait.
+
+use std::rc::Rc;
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 
@@ -25,6 +33,17 @@ use crate::descriptor::{Extent2d, PresentationTargetDescriptor, TextureDescripto
 use crate::graphics_error::GraphicsError;
 use crate::identity::{DeviceGeneration, GpuResourceIdentity, SurfaceIdentity};
 use crate::submission::FrameSubmission;
+
+/// Neutral window handle a backend can share and retain.
+///
+/// The trait unites the two `raw-window-handle` traits so one trait object
+/// carries both the window and the display side of a native window. A backend
+/// that must keep the handle past the creating call retains it behind an `Rc`,
+/// so ownership is shared with the window owner and no backend or platform type
+/// crosses the seam.
+pub trait WindowDisplayHandle: HasWindowHandle + HasDisplayHandle {}
+
+impl<T: HasWindowHandle + HasDisplayHandle + ?Sized> WindowDisplayHandle for T {}
 
 /// Backend a caller asks the interface to create.
 ///
@@ -37,15 +56,28 @@ pub enum BackendKind {
     Software,
 }
 
+/// Handle a `WindowSurface` carries to the backend.
+///
+/// The borrowed form lasts for one call and suits a backend that reads the
+/// handle at creation time. The owned form is a shared neutral handle a backend
+/// can retain for a later present.
+enum HandleSource<'window> {
+    Borrowed {
+        window_handle: &'window dyn HasWindowHandle,
+        display_handle: &'window dyn HasDisplayHandle,
+    },
+    Owned(Rc<dyn WindowDisplayHandle>),
+}
+
 /// Native window a backend presents to.
 ///
-/// The wrapper borrows a handle that implements the neutral `raw-window-handle`
+/// The wrapper carries a handle that implements the neutral `raw-window-handle`
 /// traits, together with the initial target extent. A backend reads the handle
-/// through the safe traits only; the interface names no platform window type.
-/// The borrow keeps the handle owned by the caller for the wrapper lifetime.
+/// through the safe traits only; the interface names no platform window type. A
+/// backend that must retain the handle for a later present reads the shared owned
+/// handle through `owned_handle`.
 pub struct WindowSurface<'window> {
-    window_handle: &'window dyn HasWindowHandle,
-    display_handle: &'window dyn HasDisplayHandle,
+    source: HandleSource<'window>,
     extent: Extent2d,
 }
 
@@ -54,24 +86,58 @@ impl<'window> WindowSurface<'window> {
     ///
     /// The handle must implement both neutral window-handle traits. A `winit`
     /// window satisfies both, so one borrow supplies the window and the display
-    /// side of the seam.
+    /// side of the seam. A backend that keeps nothing past the call uses this
+    /// form.
     pub fn new<H>(handle: &'window H, extent: Extent2d) -> Self
     where
         H: HasWindowHandle + HasDisplayHandle,
     {
         Self {
-            window_handle: handle,
-            display_handle: handle,
+            source: HandleSource::Borrowed {
+                window_handle: handle,
+                display_handle: handle,
+            },
+            extent,
+        }
+    }
+
+    /// Carries a shared owned window handle and the target extent.
+    ///
+    /// A backend that presents on a later frame clones the shared handle through
+    /// `owned_handle` and retains it, so the window stays alive as long as the
+    /// backend needs it. The handle stays neutral: it is only the
+    /// `raw-window-handle` traits behind an `Rc`.
+    pub fn new_owned(handle: Rc<dyn WindowDisplayHandle>, extent: Extent2d) -> Self {
+        Self {
+            source: HandleSource::Owned(handle),
             extent,
         }
     }
 
     pub fn window_handle(&self) -> &dyn HasWindowHandle {
-        self.window_handle
+        match &self.source {
+            HandleSource::Borrowed { window_handle, .. } => *window_handle,
+            HandleSource::Owned(handle) => handle,
+        }
     }
 
     pub fn display_handle(&self) -> &dyn HasDisplayHandle {
-        self.display_handle
+        match &self.source {
+            HandleSource::Borrowed { display_handle, .. } => *display_handle,
+            HandleSource::Owned(handle) => handle,
+        }
+    }
+
+    /// Returns the shared owned handle when the surface carries one.
+    ///
+    /// A borrowed surface returns `None`, so a backend that needs to retain the
+    /// handle fails to find one and stays headless instead of borrowing a handle
+    /// it cannot keep.
+    pub fn owned_handle(&self) -> Option<Rc<dyn WindowDisplayHandle>> {
+        match &self.source {
+            HandleSource::Owned(handle) => Some(Rc::clone(handle)),
+            HandleSource::Borrowed { .. } => None,
+        }
     }
 
     pub fn extent(&self) -> Extent2d {
