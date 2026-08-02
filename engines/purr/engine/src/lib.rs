@@ -22,6 +22,8 @@ mod capability_declarations;
 mod document_store;
 #[path = "dom-node.rs"]
 mod dom_node;
+#[path = "html-tokenizer.rs"]
+mod html_tokenizer;
 #[path = "mock-providers.rs"]
 mod mock_providers;
 #[path = "platform-support.rs"]
