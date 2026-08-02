@@ -14,3 +14,7 @@ workspace = true
 
 [dependencies]
 purr-graphics.workspace = true
+
+[dev-dependencies]
+purr-graphics-software = { path = "../../../engines/purr/graphics-software" }
+raw-window-handle.workspace = true
