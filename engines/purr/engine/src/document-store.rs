@@ -11,12 +11,13 @@
 //! embedding seam re-exports them as opaque handle components and never inspects
 //! their contents.
 //!
-//! At this phase a document holds only its source bytes and its generation, and
-//! `render` returns a single `Clear` command in the engine namespace. Later
-//! pipeline phases replace the render body without changing these identities or
-//! the raw-output shape.
+//! A document holds its source bytes, its generation, and the DOM the tokenizer
+//! and tree builder produce from the source on create. `render` still returns a
+//! single `Clear` command in the engine namespace. Later pipeline phases replace
+//! the render body without changing these identities or the raw-output shape.
 
 use crate::dom_node::Dom;
+use crate::html_tree_builder::parse;
 use memory::{AccountingRegistry, Arena, ArenaId, Region};
 use purr_graphics::{Color, DrawCommand, Extent2d, ProducerNamespace, ResourceUpload};
 
@@ -106,14 +107,14 @@ pub struct EngineFrame {
 
 /// One document owned by the store.
 ///
-/// At this phase the document holds its source bytes, the generation it was
-/// created with, and an empty DOM tree. Later phases add the style, layout, and
-/// paint state behind the same identity.
+/// The document holds its source bytes, the generation it was created with, and
+/// the DOM parsed from the source. Later phases add the style, layout, and paint
+/// state behind the same identity.
 struct Document {
     generation: DocumentGeneration,
-    // The tokenizer reads the source and the tree builder fills the DOM; both are
-    // later phases. The store owns them now so the seam holds them behind a
-    // stable identity.
+    // The source is retained for later re-decoding and diagnostics; the DOM is
+    // read by the style, layout, and paint phases. Both are read only in tests
+    // until those phases land.
     #[allow(dead_code)]
     source: Vec<u8>,
     #[allow(dead_code)]
@@ -160,10 +161,17 @@ impl DocumentStore {
             self.next_generation = next;
         }
 
+        // The tokenizer and tree builder run in lockstep to build the DOM. A
+        // hard parse-limit breach (a tokenizer cap or the open-element cap)
+        // aborts the parse; the store fails closed to a blank document rather
+        // than surfacing a new error, because the seam contract is frozen and a
+        // malformed local document is not a seam failure.
+        let dom = parse(source).unwrap_or_default();
+
         let document = Document {
             generation,
             source: source.to_vec(),
-            dom: Dom::new(),
+            dom,
         };
         let id = self
             .documents
@@ -218,6 +226,16 @@ impl DocumentStore {
                 .remove_accounted(id.0, Region::Document, &self.accounting);
         }
     }
+
+    /// Borrows the parsed DOM of a live document for inspection in tests.
+    #[cfg(test)]
+    fn document_dom(&self, id: DocumentId, generation: DocumentGeneration) -> Option<&Dom> {
+        let document = self.documents.get(id.0)?;
+        if document.generation != generation {
+            return None;
+        }
+        Some(&document.dom)
+    }
 }
 
 impl Default for DocumentStore {
@@ -229,9 +247,37 @@ impl Default for DocumentStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::dom_node::NodeId;
 
     fn geometry() -> (Extent2d, f32) {
         (Extent2d::new(800, 600), 1.0)
+    }
+
+    fn element_child(dom: &Dom, parent: NodeId, name: &str) -> Option<NodeId> {
+        dom.children(parent)?
+            .iter()
+            .copied()
+            .find(|&child| dom.local_name(child) == Some(name))
+    }
+
+    #[test]
+    fn create_parses_the_source_into_a_dom() {
+        let mut store = DocumentStore::new();
+        let (id, generation) = store
+            .create(
+                b"<!doctype html><html><head><title>t</title></head><body><p>hi</p></body></html>",
+            )
+            .expect("create succeeds");
+
+        let dom = store
+            .document_dom(id, generation)
+            .expect("document resolves");
+        let html = element_child(dom, dom.root(), "html").expect("html under the root");
+        let body = element_child(dom, html, "body").expect("body under html");
+        let paragraph = element_child(dom, body, "p").expect("p under body");
+        let text = dom.children(paragraph).expect("p resolves")[0];
+
+        assert_eq!(dom.text_data(text), Some("hi"));
     }
 
     #[test]

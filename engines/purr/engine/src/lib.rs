@@ -24,6 +24,8 @@ mod document_store;
 mod dom_node;
 #[path = "html-tokenizer.rs"]
 mod html_tokenizer;
+#[path = "html-tree-builder.rs"]
+mod html_tree_builder;
 #[path = "mock-providers.rs"]
 mod mock_providers;
 #[path = "platform-support.rs"]
