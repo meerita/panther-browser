@@ -207,8 +207,10 @@ impl Default for DocumentSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use purr_graphics::{DrawCommand, ResourceKind};
 
     const SOURCE: &[u8] = b"<!doctype html><html></html>";
+    const STYLED_SOURCE: &[u8] = b"<!doctype html><html><head><style>.card{background-color:#eef;width:120px;height:40px}</style></head><body><div class=\"card\">hello world</div></body></html>";
 
     fn geometry() -> ViewportGeometry {
         ViewportGeometry {
@@ -247,6 +249,58 @@ mod tests {
         assert_eq!(frame.generation, handle.generation());
         assert_eq!(frame.producer, engine_producer_namespace());
         assert_eq!(frame.validate(), Ok(()));
+    }
+
+    #[test]
+    fn produce_lowers_the_document_to_a_validated_frame() {
+        let mut session = DocumentSession::new();
+        let handle = session.attach(STYLED_SOURCE).expect("attach succeeds");
+
+        let frame = session
+            .produce(&handle, geometry())
+            .expect("produce succeeds");
+
+        assert_eq!(frame.validate(), Ok(()));
+        assert_eq!(frame.generation, handle.generation());
+
+        // Exactly one glyph-atlas upload.
+        assert_eq!(frame.uploads.len(), 1);
+        assert_eq!(
+            frame.uploads[0].resource.resource_kind(),
+            ResourceKind::GlyphAtlas
+        );
+
+        // A background fill and at least one glyph quad.
+        assert!(
+            frame
+                .commands
+                .iter()
+                .any(|command| matches!(command, DrawCommand::FillRect { .. }))
+        );
+        assert!(
+            frame
+                .commands
+                .iter()
+                .any(|command| matches!(command, DrawCommand::TexturedQuad { .. }))
+        );
+    }
+
+    #[test]
+    fn a_new_generation_produces_a_frame_tagged_with_the_new_generation() {
+        let mut session = DocumentSession::new();
+        let first = session.attach(STYLED_SOURCE).expect("attach succeeds");
+        let second = session.attach(STYLED_SOURCE).expect("attach succeeds");
+
+        let first_frame = session
+            .produce(&first, geometry())
+            .expect("produce succeeds");
+        let second_frame = session
+            .produce(&second, geometry())
+            .expect("produce succeeds");
+
+        assert_eq!(first_frame.generation, first.generation());
+        assert_eq!(second_frame.generation, second.generation());
+        assert_ne!(first_frame.generation, second_frame.generation);
     }
 
     #[test]

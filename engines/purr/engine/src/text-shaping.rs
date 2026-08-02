@@ -102,6 +102,7 @@ pub struct GlyphRun {
     id: GlyphRunId,
     generation: GlyphRunGeneration,
     font: FontHandle,
+    size: LayoutUnit,
     glyphs: Vec<PositionedGlyph>,
     cluster_map: Vec<usize>,
 }
@@ -120,6 +121,15 @@ impl GlyphRun {
     /// The font this run was shaped with.
     pub fn font(&self) -> FontHandle {
         self.font
+    }
+
+    /// The pixel size this run was shaped at.
+    ///
+    /// The size is a shaping input, not a texture coordinate: it records the font
+    /// size the advances were measured with, so a later stage can rasterize the
+    /// glyphs at the matching size. It is not an atlas position.
+    pub fn size(&self) -> LayoutUnit {
+        self.size
     }
 
     /// The number of glyphs.
@@ -169,6 +179,7 @@ impl GlyphRun {
             run_id: self.id,
             generation: self.generation,
             font: self.font,
+            size: self.size,
             glyphs: self.glyphs[start..end].to_vec(),
             cluster_map: self.cluster_map[start..end].to_vec(),
         })
@@ -188,6 +199,7 @@ pub struct GlyphRunSlice {
     run_id: GlyphRunId,
     generation: GlyphRunGeneration,
     font: FontHandle,
+    size: LayoutUnit,
     glyphs: Vec<PositionedGlyph>,
     cluster_map: Vec<usize>,
 }
@@ -206,6 +218,14 @@ impl GlyphRunSlice {
     /// The font the run was shaped with.
     pub fn font(&self) -> FontHandle {
         self.font
+    }
+
+    /// The pixel size the run was shaped at.
+    ///
+    /// Paint rasterizes each glyph at this size; it is a shaping input, never a
+    /// texture coordinate.
+    pub fn size(&self) -> LayoutUnit {
+        self.size
     }
 
     /// The number of glyphs in the slice.
@@ -284,6 +304,7 @@ impl TextShapingAdapter for CmapOneToOneAdapter {
             id: request.run_id,
             generation: request.generation,
             font: request.font.handle(),
+            size: request.size,
             glyphs,
             cluster_map,
         })
@@ -322,6 +343,10 @@ mod tests {
             .map(|i| run.source_index(i).expect("mapped"))
             .collect();
         assert_eq!(source, [0, 1, 2, 3]);
+
+        // The run records the size it was shaped at, so a later stage rasterizes
+        // the glyphs at the matching size.
+        assert_eq!(run.size(), LayoutUnit::from_px(16).expect("in range"));
     }
 
     #[test]
@@ -360,6 +385,7 @@ mod tests {
         assert_eq!(slice.total_advance().raw(), 3 * 538);
         assert_eq!(slice.run_id(), run.id());
         assert_eq!(slice.generation(), run.generation());
+        assert_eq!(slice.size(), run.size());
     }
 
     #[test]

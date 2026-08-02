@@ -50,6 +50,8 @@ mod layout_tree;
 mod layout_unit;
 #[path = "mock-providers.rs"]
 mod mock_providers;
+#[path = "paint.rs"]
+mod paint;
 #[path = "platform-support.rs"]
 mod platform_support;
 #[path = "style-cascade.rs"]

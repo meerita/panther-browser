@@ -12,14 +12,38 @@
 //! their contents.
 //!
 //! A document holds its source bytes, its generation, and the DOM the tokenizer
-//! and tree builder produce from the source on create. `render` still returns a
-//! single `Clear` command in the engine namespace. Later pipeline phases replace
-//! the render body without changing these identities or the raw-output shape.
+//! and tree builder produce from the source on create. `render` runs style,
+//! layout, and paint for the requested viewport and returns the generation-tagged
+//! display list (the block and inline backgrounds, the per-glyph textured quads,
+//! and the single glyph-atlas upload) in the engine namespace.
 
+use crate::block_layout::{ConstraintSpace, layout_document};
+use crate::bundled_font::BundledFont;
+use crate::computed_style::{StyleGeneration, resolve_document_style};
+use crate::css_parser::{Origin, Stylesheet, parse_stylesheet};
 use crate::dom_node::Dom;
+use crate::fragment_tree::LayoutGeneration;
 use crate::html_tree_builder::parse;
+use crate::layout_unit::{LayoutSize, LayoutUnit};
+use crate::paint::paint_document;
+use crate::user_agent_styles::parse_user_agent_stylesheet;
 use memory::{AccountingRegistry, Arena, ArenaId, Region};
-use purr_graphics::{Color, DrawCommand, Extent2d, ProducerNamespace, ResourceUpload};
+use purr_graphics::{
+    Color, DeviceGeneration, DrawCommand, Extent2d, ProducerNamespace, Rect, ResourceGeneration,
+    ResourceUpload,
+};
+
+/// Upper bound for the content width layout receives, in CSS pixels.
+///
+/// The seam viewport extent is untrusted input. The bound keeps the fixed-point
+/// conversion of the available inline size in range before layout runs.
+const MAX_CONTENT_WIDTH: u32 = 1_000_000;
+
+/// Upper bound for the device pixel ratio paint applies.
+///
+/// A hostile or malformed ratio is clamped into this range, so paint and glyph
+/// rasterization sizing stay bounded.
+const MAX_DEVICE_PIXEL_RATIO: f32 = 8.0;
 
 /// Draw-op identifier space of the engine.
 ///
@@ -108,16 +132,14 @@ pub struct EngineFrame {
 /// One document owned by the store.
 ///
 /// The document holds its source bytes, the generation it was created with, and
-/// the DOM parsed from the source. Later phases add the style, layout, and paint
-/// state behind the same identity.
+/// the DOM parsed from the source. Render reads the DOM to run style, layout, and
+/// paint behind the same identity.
 struct Document {
     generation: DocumentGeneration,
-    // The source is retained for later re-decoding and diagnostics; the DOM is
-    // read by the style, layout, and paint phases. Both are read only in tests
-    // until those phases land.
+    // The source is retained for later re-decoding and diagnostics; it is not read
+    // by the render pipeline yet.
     #[allow(dead_code)]
     source: Vec<u8>,
-    #[allow(dead_code)]
     dom: Dom,
 }
 
@@ -184,14 +206,17 @@ impl DocumentStore {
     ///
     /// Rejects a handle whose slot was freed with `StaleGeneration`, and a
     /// handle whose generation does not match the live document with
-    /// `UnknownDocument`. The geometry is consumed by later layout and paint
-    /// phases; at this phase render clears the content box.
+    /// `UnknownDocument`. For a live handle it runs style, layout, and paint for
+    /// the viewport geometry and returns the generation-tagged display list. A
+    /// malformed local document that overruns a layout cap is not a seam failure,
+    /// so the pipeline fails closed to a blank frame rather than surfacing a new
+    /// error, keeping the seam contract frozen.
     pub fn render(
         &self,
         id: DocumentId,
         generation: DocumentGeneration,
-        _content_extent: Extent2d,
-        _device_pixel_ratio: f32,
+        content_extent: Extent2d,
+        device_pixel_ratio: f32,
     ) -> Result<EngineFrame, DocumentError> {
         let Some(document) = self.documents.get(id.0) else {
             return Err(DocumentError::StaleGeneration);
@@ -201,14 +226,12 @@ impl DocumentStore {
             return Err(DocumentError::UnknownDocument);
         }
 
-        Ok(EngineFrame {
+        Ok(render_document(
+            &document.dom,
             generation,
-            producer: engine_producer_namespace(),
-            uploads: Vec::new(),
-            commands: vec![DrawCommand::Clear {
-                color: Color::new(1.0, 1.0, 1.0, 1.0),
-            }],
-        })
+            content_extent,
+            device_pixel_ratio,
+        ))
     }
 
     /// Frees a document.
@@ -244,10 +267,143 @@ impl Default for DocumentStore {
     }
 }
 
+/// Runs style, layout, and paint for one document, failing closed to a blank frame.
+///
+/// A cap breach, a numeric overflow, or a font-load failure in the pipeline yields
+/// a minimal valid frame (a document-background fill) instead of an error, because
+/// the frozen seam carries no render-failure code and a malformed local document is
+/// not a seam failure.
+fn render_document(
+    dom: &Dom,
+    generation: DocumentGeneration,
+    content_extent: Extent2d,
+    device_pixel_ratio: f32,
+) -> EngineFrame {
+    lower_document(dom, generation, content_extent, device_pixel_ratio)
+        .unwrap_or_else(|| fallback_frame(generation, content_extent, device_pixel_ratio))
+}
+
+/// Lowers a document to a display list, or `None` on any internal pipeline failure.
+fn lower_document(
+    dom: &Dom,
+    generation: DocumentGeneration,
+    content_extent: Extent2d,
+    device_pixel_ratio: f32,
+) -> Option<EngineFrame> {
+    let dpr = normalize_device_pixel_ratio(device_pixel_ratio);
+
+    let author = extract_author_stylesheet(dom);
+    let user_agent = parse_user_agent_stylesheet();
+    let styles = resolve_document_style(
+        dom,
+        &user_agent,
+        &author,
+        StyleGeneration::new(generation.value()),
+    );
+
+    let available_inline =
+        LayoutUnit::from_px_saturating(clamp_content_width(content_extent.width));
+    let constraint = ConstraintSpace::new(available_inline, LayoutSize::Indefinite);
+    let tree = layout_document(
+        dom,
+        &styles,
+        &constraint,
+        LayoutGeneration::new(generation.value()),
+    )
+    .ok()?;
+
+    let font = BundledFont::load().ok()?;
+    let paint = paint_document(
+        &tree,
+        &styles,
+        &font,
+        content_extent,
+        dpr,
+        ResourceGeneration::new(generation.value()),
+        DeviceGeneration::new(1),
+    )
+    .ok()?;
+
+    Some(EngineFrame {
+        generation,
+        producer: engine_producer_namespace(),
+        uploads: paint.uploads,
+        commands: paint.commands,
+    })
+}
+
+/// A minimal valid frame: the document background over the content extent.
+fn fallback_frame(
+    generation: DocumentGeneration,
+    content_extent: Extent2d,
+    device_pixel_ratio: f32,
+) -> EngineFrame {
+    let dpr = normalize_device_pixel_ratio(device_pixel_ratio);
+    EngineFrame {
+        generation,
+        producer: engine_producer_namespace(),
+        uploads: Vec::new(),
+        commands: vec![DrawCommand::FillRect {
+            rect: Rect::new(
+                0.0,
+                0.0,
+                content_extent.width as f32 * dpr,
+                content_extent.height as f32 * dpr,
+            ),
+            color: Color::new(1.0, 1.0, 1.0, 1.0),
+        }],
+    }
+}
+
+/// Parses the concatenated `<style>` element text as the author stylesheet.
+///
+/// The walk is an explicit stack, so a deep document does not recurse. Every
+/// `<style>` element contributes its text children, in document order. A document
+/// with no `<style>` yields an empty author stylesheet.
+fn extract_author_stylesheet(dom: &Dom) -> Stylesheet {
+    let mut source = String::new();
+    let mut stack = vec![dom.root()];
+    while let Some(node) = stack.pop() {
+        if dom.local_name(node) == Some("style")
+            && let Some(children) = dom.children(node)
+        {
+            for &child in children {
+                if let Some(text) = dom.text_data(child) {
+                    source.push_str(text);
+                }
+            }
+        }
+        if let Some(children) = dom.children(node) {
+            for &child in children.iter().rev() {
+                stack.push(child);
+            }
+        }
+    }
+    parse_stylesheet(&source, Origin::Author)
+}
+
+/// Clamps the untrusted content width to the layout bound, in CSS pixels.
+fn clamp_content_width(width: u32) -> i32 {
+    width.min(MAX_CONTENT_WIDTH) as i32
+}
+
+/// Normalizes the device pixel ratio, defaulting a non-finite or non-positive
+/// value to one and clamping an extreme value to the bound.
+fn normalize_device_pixel_ratio(device_pixel_ratio: f32) -> f32 {
+    if device_pixel_ratio.is_finite() && device_pixel_ratio > 0.0 {
+        device_pixel_ratio.min(MAX_DEVICE_PIXEL_RATIO)
+    } else {
+        1.0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::dom_node::NodeId;
+    use purr_graphics::ResourceKind;
+
+    const STYLED_SOURCE: &[u8] = b"<html><head><style>.card{background-color:#eef;width:100px;height:40px}</style></head><body><div class=\"card\">hi</div></body></html>";
 
     fn geometry() -> (Extent2d, f32) {
         (Extent2d::new(800, 600), 1.0)
@@ -281,9 +437,9 @@ mod tests {
     }
 
     #[test]
-    fn create_reports_the_engine_namespace_on_render() {
+    fn render_lowers_the_document_to_a_glyph_atlas_frame() {
         let mut store = DocumentStore::new();
-        let (id, generation) = store.create(b"<html></html>").expect("create succeeds");
+        let (id, generation) = store.create(STYLED_SOURCE).expect("create succeeds");
         let (extent, dpr) = geometry();
 
         let frame = store
@@ -292,13 +448,46 @@ mod tests {
 
         assert_eq!(frame.generation, generation);
         assert_eq!(frame.producer, engine_producer_namespace());
-        assert!(frame.uploads.is_empty());
+
+        // Exactly one upload, the glyph atlas.
+        assert_eq!(frame.uploads.len(), 1);
         assert_eq!(
-            frame.commands,
-            vec![DrawCommand::Clear {
-                color: Color::new(1.0, 1.0, 1.0, 1.0),
-            }]
+            frame.uploads[0].resource.resource_kind(),
+            ResourceKind::GlyphAtlas
         );
+
+        // The card background is a fill; the "hi" text produces glyph quads.
+        assert!(
+            frame
+                .commands
+                .iter()
+                .any(|command| matches!(command, DrawCommand::FillRect { .. }))
+        );
+        assert!(
+            frame
+                .commands
+                .iter()
+                .any(|command| matches!(command, DrawCommand::TexturedQuad { .. }))
+        );
+    }
+
+    #[test]
+    fn render_tags_the_frame_with_the_document_generation() {
+        let mut store = DocumentStore::new();
+        let (first_id, first_generation) = store.create(STYLED_SOURCE).expect("create succeeds");
+        let (second_id, second_generation) = store.create(STYLED_SOURCE).expect("create succeeds");
+        let (extent, dpr) = geometry();
+
+        let first = store
+            .render(first_id, first_generation, extent, dpr)
+            .expect("render succeeds");
+        let second = store
+            .render(second_id, second_generation, extent, dpr)
+            .expect("render succeeds");
+
+        assert_eq!(first.generation, first_generation);
+        assert_eq!(second.generation, second_generation);
+        assert_ne!(first.generation, second.generation);
     }
 
     #[test]
