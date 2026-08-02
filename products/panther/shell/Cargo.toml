@@ -1,0 +1,16 @@
+# @file products/panther/shell/Cargo.toml
+# @description Declares the Panther shell chrome model, layout, and draw package.
+# @created Diego Martín Lafuente <meerita@icloud.com>
+
+[package]
+name = "panther-shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+purr-graphics.workspace = true

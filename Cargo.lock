@@ -1985,6 +1985,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "panther-shell"
+version = "0.1.0"
+dependencies = [
+ "purr-graphics",
+]
+
+[[package]]
 name = "panther-window"
 version = "0.1.0"
 dependencies = [

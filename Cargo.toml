@@ -8,6 +8,7 @@ members = [
     "apps/panther",
     "products/panther/browser",
     "products/panther/localization",
+    "products/panther/shell",
     "products/panther/window",
     "engines/purr/embedding",
     "engines/purr/engine",
@@ -42,6 +43,7 @@ icu_locale_core = "2.2"
 locale = { path = "foundation/locale" }
 memory = { path = "foundation/memory" }
 panther-localization = { path = "products/panther/localization" }
+panther-shell = { path = "products/panther/shell" }
 pollster = "0.4"
 purr-graphics = { path = "engines/purr/graphics" }
 raw-window-handle = "0.6"
