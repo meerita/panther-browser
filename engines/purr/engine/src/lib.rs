@@ -16,6 +16,8 @@
 //! pipeline output the embedding seam wraps. The store surfaces opaque document
 //! identities the seam re-exports as handle components.
 
+#[path = "bundled-font.rs"]
+mod bundled_font;
 #[path = "capability-declarations.rs"]
 mod capability_declarations;
 #[path = "computed-style.rs"]
@@ -40,6 +42,8 @@ mod mock_providers;
 mod platform_support;
 #[path = "style-cascade.rs"]
 mod style_cascade;
+#[path = "text-shaping.rs"]
+mod text_shaping;
 #[path = "user-agent-styles.rs"]
 mod user_agent_styles;
 
