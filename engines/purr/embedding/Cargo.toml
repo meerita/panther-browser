@@ -15,3 +15,5 @@ workspace = true
 [dependencies]
 capability-system.workspace = true
 purr-engine = { path = "../engine" }
+purr-graphics.workspace = true
+thiserror.workspace = true

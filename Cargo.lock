@@ -2247,6 +2247,8 @@ version = "0.1.0"
 dependencies = [
  "capability-system",
  "purr-engine",
+ "purr-graphics",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -2254,6 +2256,9 @@ name = "purr-engine"
 version = "0.1.0"
 dependencies = [
  "capability-system",
+ "memory",
+ "purr-graphics",
+ "thiserror 2.0.19",
 ]
 
 [[package]]

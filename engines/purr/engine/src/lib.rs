@@ -11,9 +11,15 @@
 //! them, and supplies the mock providers that attach behavior. The product
 //! merges these declarations into its catalogue; the engine holds no product
 //! policy.
+//!
+//! It also owns the document store: the arena of attached documents and the raw
+//! pipeline output the embedding seam wraps. The store surfaces opaque document
+//! identities the seam re-exports as handle components.
 
 #[path = "capability-declarations.rs"]
 mod capability_declarations;
+#[path = "document-store.rs"]
+mod document_store;
 #[path = "mock-providers.rs"]
 mod mock_providers;
 #[path = "platform-support.rs"]
@@ -22,6 +28,10 @@ mod platform_support;
 pub use capability_declarations::{
     AUTHOR_STYLES, GPU_ACCELERATION, SERVICE_WORKERS, USER_AGENT_STYLES, WEBGPU,
     engine_capabilities,
+};
+pub use document_store::{
+    DocumentError, DocumentGeneration, DocumentId, DocumentStore, EngineFrame, MAX_SOURCE_BYTES,
+    engine_producer_namespace,
 };
 pub use mock_providers::{SucceedingProvider, WebGpuProvider};
 pub use platform_support::platform_supports;
