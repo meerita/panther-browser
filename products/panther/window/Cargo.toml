@@ -13,6 +13,7 @@ publish = false
 workspace = true
 
 [dependencies]
+panther-shell.workspace = true
 purr-graphics.workspace = true
 purr-graphics-wgpu = { path = "../../../engines/purr/graphics-wgpu" }
 purr-graphics-software = { path = "../../../engines/purr/graphics-software" }

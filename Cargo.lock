@@ -1997,6 +1997,7 @@ dependencies = [
 name = "panther-window"
 version = "0.1.0"
 dependencies = [
+ "panther-shell",
  "purr-graphics",
  "purr-graphics-software",
  "purr-graphics-wgpu",

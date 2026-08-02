@@ -9,9 +9,11 @@
 //! dependencies; `purr-graphics` names none of them. Only the neutral window
 //! handle crosses the seam, through `WindowSurface`.
 //!
-//! At M0 the crate presents one fixed demonstration frame and handles resize and
-//! close. The detailed event loop, input routing, resize policy, and multi-window
-//! management belong to the later windowing work.
+//! The crate drives the `panther-shell` chrome through the window loop. It
+//! forwards pointer and keyboard input to the shell, relays resize, and presents
+//! the shell command list on demand. `winit` and backend types stay inside this
+//! crate; only neutral input values and the neutral command list cross to the
+//! shell. Multi-window management belongs to the later windowing work.
 
 #[path = "active-backend.rs"]
 mod active_backend;
