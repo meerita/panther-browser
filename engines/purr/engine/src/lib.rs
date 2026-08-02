@@ -32,10 +32,14 @@ mod css_tokenizer;
 mod document_store;
 #[path = "dom-node.rs"]
 mod dom_node;
+#[path = "fragment-tree.rs"]
+mod fragment_tree;
 #[path = "html-tokenizer.rs"]
 mod html_tokenizer;
 #[path = "html-tree-builder.rs"]
 mod html_tree_builder;
+#[path = "inline-layout.rs"]
+mod inline_layout;
 #[path = "layout-tree.rs"]
 mod layout_tree;
 #[path = "layout-unit.rs"]

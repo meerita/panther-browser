@@ -60,6 +60,14 @@ pub enum LayoutError {
     TooDeep,
     #[error("the fragment tree reached its maximum fragment count")]
     TooManyFragments,
+    #[error("the inline content reached its maximum item count")]
+    TooManyInlineItems,
+    #[error("the inline content reached its maximum line count")]
+    TooManyLines,
+    #[error("the inline content reached its maximum text-fragment count")]
+    TooManyTextFragments,
+    #[error("the text could not be shaped")]
+    TextShapingFailed,
     #[error("a layout value exceeded the fixed-point range")]
     Overflow,
 }

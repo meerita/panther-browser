@@ -154,6 +154,87 @@ impl GlyphRun {
             sum.saturating_add(glyph.advance)
         })
     }
+
+    /// A slice of the run over the glyph range `[start, end)`, or `None` when the
+    /// range is inverted or out of bounds.
+    ///
+    /// The slice copies the glyphs and the parallel cluster map for the range, so
+    /// it keeps the glyph-to-source mapping. Slicing is how inline layout splits a
+    /// run at a line break without losing the cluster map.
+    pub fn slice(&self, start: usize, end: usize) -> Option<GlyphRunSlice> {
+        if start > end || end > self.glyphs.len() {
+            return None;
+        }
+        Some(GlyphRunSlice {
+            run_id: self.id,
+            generation: self.generation,
+            font: self.font,
+            glyphs: self.glyphs[start..end].to_vec(),
+            cluster_map: self.cluster_map[start..end].to_vec(),
+        })
+    }
+}
+
+/// An immutable slice of a shaped glyph run.
+///
+/// Inline layout slices a run at a line break and keeps the slice in a text
+/// fragment. The slice owns the glyphs and the parallel cluster map for its range,
+/// and records the source run identity and generation, so it still maps each glyph
+/// back to the source text byte offset without borrowing the run. The cluster map
+/// stores byte offsets (`usize`), a different type from the glyph index, so a glyph
+/// index and a text index cannot be interchanged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlyphRunSlice {
+    run_id: GlyphRunId,
+    generation: GlyphRunGeneration,
+    font: FontHandle,
+    glyphs: Vec<PositionedGlyph>,
+    cluster_map: Vec<usize>,
+}
+
+impl GlyphRunSlice {
+    /// The identity of the run this slice comes from.
+    pub fn run_id(&self) -> GlyphRunId {
+        self.run_id
+    }
+
+    /// The generation of the run this slice comes from.
+    pub fn generation(&self) -> GlyphRunGeneration {
+        self.generation
+    }
+
+    /// The font the run was shaped with.
+    pub fn font(&self) -> FontHandle {
+        self.font
+    }
+
+    /// The number of glyphs in the slice.
+    pub fn len(&self) -> usize {
+        self.glyphs.len()
+    }
+
+    /// Whether the slice has no glyphs.
+    pub fn is_empty(&self) -> bool {
+        self.glyphs.is_empty()
+    }
+
+    /// The glyphs of the slice in visual order.
+    pub fn glyphs(&self) -> &[PositionedGlyph] {
+        &self.glyphs
+    }
+
+    /// The source text byte offset the glyph at `position` came from, or `None`
+    /// when the position is out of range.
+    pub fn source_index(&self, position: usize) -> Option<usize> {
+        self.cluster_map.get(position).copied()
+    }
+
+    /// The total advance of the slice, clamped to the fixed-point range.
+    pub fn total_advance(&self) -> LayoutUnit {
+        self.glyphs.iter().fold(LayoutUnit::ZERO, |sum, glyph| {
+            sum.saturating_add(glyph.advance)
+        })
+    }
 }
 
 /// A request to shape one text run.
@@ -266,6 +347,26 @@ mod tests {
     fn total_advance_sums_the_glyph_advances() {
         let run = shape("Aa 0");
         assert_eq!(run.total_advance().raw(), 4 * 538);
+    }
+
+    #[test]
+    fn a_slice_preserves_the_cluster_map_of_its_range() {
+        let run = shape("aaa bbb");
+        // Slice the second word "bbb", glyph positions 4..7.
+        let slice = run.slice(4, 7).expect("in range");
+        assert_eq!(slice.len(), 3);
+        assert_eq!(slice.source_index(0), Some(4));
+        assert_eq!(slice.source_index(2), Some(6));
+        assert_eq!(slice.total_advance().raw(), 3 * 538);
+        assert_eq!(slice.run_id(), run.id());
+        assert_eq!(slice.generation(), run.generation());
+    }
+
+    #[test]
+    fn an_out_of_range_slice_returns_none() {
+        let run = shape("aa");
+        assert_eq!(run.slice(0, 3), None);
+        assert_eq!(run.slice(2, 1), None);
     }
 
     #[test]
