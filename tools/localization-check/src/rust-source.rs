@@ -25,12 +25,13 @@ pub struct StringLiteral {
 /// Extracts every double-quoted string literal from a Rust source.
 ///
 /// The scan is a small character state machine. It skips line and block
-/// comments so documentation text is never treated as a literal, tracks the
-/// nearest enclosing call and attribute, and follows the brace scope a
-/// `#[cfg(test)]` item opens so code after a test module is never mistaken for
-/// test code. It does not aim to be a full Rust parser; the workspace uses
-/// neither raw strings nor quote-bearing character literals in the scanned code,
-/// and the scan stays sound for the constructs that are present.
+/// comments so documentation text is never treated as a literal, skips character
+/// literals so a quote-bearing character literal (for example `'"'` in a
+/// tokenizer) never opens a false string, tracks the nearest enclosing call and
+/// attribute, and follows the brace scope a `#[cfg(test)]` item opens so code
+/// after a test module is never mistaken for test code. It does not aim to be a
+/// full Rust parser; the workspace uses no raw strings in the scanned code, and
+/// the scan stays sound for the constructs that are present.
 pub fn extract_string_literals(source: &str) -> Vec<StringLiteral> {
     let chars: Vec<char> = source.chars().collect();
 
@@ -182,6 +183,17 @@ pub fn extract_string_literals(source: &str) -> Vec<StringLiteral> {
             continue;
         }
 
+        if current == '\'' {
+            if let Some(next) = skip_character_literal(&chars, index) {
+                index = next;
+                word.clear();
+                continue;
+            }
+            word.clear();
+            index += 1;
+            continue;
+        }
+
         if is_word_char(current) {
             word.push(current);
             index += 1;
@@ -328,6 +340,39 @@ fn is_skipped_directory(path: &Path) -> bool {
         .is_some_and(|name| name == "target" || name.starts_with('.'))
 }
 
+/// Returns the index past a Rust character literal that opens at `open`.
+///
+/// A quote can open a character literal (`'x'`, `'\n'`, `'\''`, `'"'`,
+/// `'\u{1F600}'`) or a lifetime (`'a`, `'static`). Only a character literal is
+/// skipped, so a quote-bearing character literal never opens a false string. A
+/// lifetime, or a malformed literal, returns `None` and is treated as a
+/// separator.
+fn skip_character_literal(chars: &[char], open: usize) -> Option<usize> {
+    if chars.get(open) != Some(&'\'') {
+        return None;
+    }
+
+    match chars.get(open + 1) {
+        Some('\\') => {
+            let mut index = open + 2;
+            if chars.get(index) == Some(&'u') {
+                while index < chars.len() && chars[index] != '}' {
+                    index += 1;
+                }
+                index += 1;
+            } else {
+                index += 1;
+            }
+            match chars.get(index) {
+                Some('\'') => Some(index + 1),
+                _ => None,
+            }
+        }
+        Some(_) if chars.get(open + 2) == Some(&'\'') => Some(open + 3),
+        _ => None,
+    }
+}
+
 fn is_word_char(character: char) -> bool {
     character.is_ascii_alphanumeric()
         || character == '_'
@@ -361,4 +406,33 @@ fn attribute_is_test_gate(chars: &[char], open_bracket: usize) -> bool {
         .filter(|character| !character.is_whitespace())
         .collect();
     normalized.contains("cfg(test)")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn skip(source: &str) -> Option<usize> {
+        let chars: Vec<char> = source.chars().collect();
+        skip_character_literal(&chars, 0)
+    }
+
+    #[test]
+    fn skips_simple_and_quote_bearing_character_literals() {
+        assert_eq!(skip("'a'"), Some(3));
+        assert_eq!(skip("'\"'"), Some(3));
+        assert_eq!(skip("'\\''"), Some(4));
+        assert_eq!(skip("'\\n'"), Some(4));
+    }
+
+    #[test]
+    fn skips_a_unicode_escape_character_literal() {
+        assert_eq!(skip("'\\u{1F600}'"), Some(11));
+    }
+
+    #[test]
+    fn treats_a_lifetime_as_a_separator() {
+        assert_eq!(skip("'static"), None);
+        assert_eq!(skip("'a "), None);
+    }
 }
