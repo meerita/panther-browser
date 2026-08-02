@@ -14,6 +14,7 @@ workspace = true
 
 [dependencies]
 panther-shell.workspace = true
+purr-embedding = { path = "../../../engines/purr/embedding" }
 purr-graphics.workspace = true
 purr-graphics-wgpu = { path = "../../../engines/purr/graphics-wgpu" }
 purr-graphics-software = { path = "../../../engines/purr/graphics-software" }

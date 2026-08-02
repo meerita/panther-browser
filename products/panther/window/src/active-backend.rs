@@ -15,8 +15,9 @@
 //! renders.
 
 use purr_graphics::{
-    BackendKind, Extent2d, FrameSubmission, GraphicsBackend, GraphicsError,
-    PresentationTargetDescriptor, SurfaceIdentity, WindowSurface, select_backend,
+    BackendKind, Extent2d, FrameSubmission, GpuResourceIdentity, GraphicsBackend, GraphicsError,
+    PresentationTargetDescriptor, SurfaceIdentity, TextureDescriptor, WindowSurface,
+    select_backend,
 };
 use purr_graphics_software::SoftwareBackend;
 use purr_graphics_wgpu::WgpuBackend;
@@ -56,6 +57,16 @@ impl ActiveBackend {
         match self {
             Self::Hardware(backend) => backend.resize_presentation_target(surface, extent),
             Self::Software(backend) => backend.resize_presentation_target(surface, extent),
+        }
+    }
+
+    pub(crate) fn allocate_texture(
+        &mut self,
+        descriptor: &TextureDescriptor,
+    ) -> Result<GpuResourceIdentity, GraphicsError> {
+        match self {
+            Self::Hardware(backend) => backend.allocate_texture(descriptor),
+            Self::Software(backend) => backend.allocate_texture(descriptor),
         }
     }
 

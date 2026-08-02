@@ -190,13 +190,29 @@ fn is_diagnostic_method(name: &str) -> bool {
 /// A prose literal has at least [`PROSE_WORD_THRESHOLD`] space-separated word
 /// tokens. A token counts as a word when it holds at least two ASCII letters and
 /// carries no identifier punctuation, so codes, dotted paths, and kebab or snake
-/// identifiers do not register as words.
+/// identifiers do not register as words. Structured code or markup is excluded
+/// first, so an embedded stylesheet or code block never counts.
 fn is_prose(content: &str) -> bool {
+    if is_structured_data(content) {
+        return false;
+    }
+
     content
         .split_whitespace()
         .filter(|token| is_word_token(token))
         .count()
         >= PROSE_WORD_THRESHOLD
+}
+
+/// Reports whether a literal is structured code or markup, not natural language.
+///
+/// An embedded stylesheet or code block carries brace-delimited declarations
+/// (`selector { property: value; }`). That is engine data, not user-facing prose,
+/// and a natural-language message never carries this declaration structure. The
+/// rule requires all of a block open, a block close, a declaration separator, and
+/// a name-to-value separator, so an ordinary sentence never qualifies.
+fn is_structured_data(content: &str) -> bool {
+    content.contains('{') && content.contains('}') && content.contains(';') && content.contains(':')
 }
 
 fn is_word_token(token: &str) -> bool {
@@ -307,6 +323,39 @@ mod tests {
         assert!(!leaked.in_test);
         assert!(!is_escape_hatch(leaked));
         assert!(is_prose(&leaked.content));
+    }
+
+    #[test]
+    fn excludes_an_embedded_stylesheet_from_prose() {
+        let sheet = "\nbody { display: block; margin: 8px; }\np { display: block; }\n";
+        assert!(is_structured_data(sheet));
+        assert!(!is_prose(sheet));
+    }
+
+    #[test]
+    fn a_sentence_with_a_colon_is_still_prose() {
+        let sentence = "The capability is not included: rebuild the project.";
+        assert!(!is_structured_data(sentence));
+        assert!(is_prose(sentence));
+    }
+
+    #[test]
+    fn a_quote_bearing_character_literal_does_not_open_a_string() {
+        let source = concat!(
+            "fn classify(current: char) {\n",
+            "    match current {\n",
+            "        '\"' => start_string(),\n",
+            "        '\\'' => start_char(),\n",
+            "        _ => {}\n",
+            "    }\n",
+            "}\n",
+            "pub fn leaked() -> &'static str {\n",
+            "    \"The capability is not included in this build.\"\n",
+            "}\n",
+        );
+        let literals = extract_string_literals(source);
+        assert_eq!(literals.len(), 1);
+        assert!(literals[0].content.contains("not included"));
     }
 
     #[test]

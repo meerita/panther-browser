@@ -2068,6 +2068,7 @@ name = "panther-window"
 version = "0.1.0"
 dependencies = [
  "panther-shell",
+ "purr-embedding",
  "purr-graphics",
  "purr-graphics-software",
  "purr-graphics-wgpu",
@@ -2247,6 +2248,8 @@ version = "0.1.0"
 dependencies = [
  "capability-system",
  "purr-engine",
+ "purr-graphics",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -2254,6 +2257,9 @@ name = "purr-engine"
 version = "0.1.0"
 dependencies = [
  "capability-system",
+ "memory",
+ "purr-graphics",
+ "thiserror 2.0.19",
 ]
 
 [[package]]

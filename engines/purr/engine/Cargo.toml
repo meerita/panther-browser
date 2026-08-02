@@ -14,3 +14,6 @@ workspace = true
 
 [dependencies]
 capability-system.workspace = true
+memory.workspace = true
+purr-graphics.workspace = true
+thiserror.workspace = true
