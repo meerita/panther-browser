@@ -14,9 +14,10 @@
 //! against the file, every read is range-checked, and every size calculation uses
 //! checked arithmetic. Malformed input returns a typed [`FontError`] and never
 //! panics. The parser reads only the tables the M2 path needs: the header metrics
-//! (`head`, `hhea`, `maxp`), the horizontal advances (`hmtx`), and the Unicode
-//! `cmap`. It confirms the outline tables (`glyf`, `loca`) exist so a later phase
-//! can rasterize, but it does not decode outlines here.
+//! (`head`, `hhea`, `maxp`), the horizontal advances (`hmtx`), the Unicode `cmap`,
+//! and the outline tables (`glyf`, `loca`). It keeps the `glyf` bytes and the
+//! resolved `loca` offsets so [`BundledFont::outline`] decodes one glyph on demand
+//! for the rasterizer; the outline itself is decoded per glyph, not on load.
 
 // Font metrics and advances are consumed by the shaping adapter and, from a later
 // phase, by inline layout. This phase adds the loader and exercises it through the
@@ -31,6 +32,20 @@ use memory::{AccountingRegistry, ByteCount, Region};
 /// A real font has a few dozen tables. The bound rejects a malformed directory
 /// that claims an implausible table count before any allocation.
 const MAX_TABLE_COUNT: usize = 4_096;
+
+/// Upper bound for the number of points in one simple glyph.
+///
+/// A real Latin glyph has at most a few hundred points. The bound rejects a
+/// malformed glyph that claims an implausible point count before any allocation.
+const MAX_GLYPH_POINTS: usize = 20_000;
+
+// Simple-glyph flag bits, from the TrueType `glyf` table format.
+const FLAG_ON_CURVE: u8 = 0x01;
+const FLAG_X_SHORT: u8 = 0x02;
+const FLAG_Y_SHORT: u8 = 0x04;
+const FLAG_REPEAT: u8 = 0x08;
+const FLAG_X_SAME_OR_POSITIVE: u8 = 0x10;
+const FLAG_Y_SAME_OR_POSITIVE: u8 = 0x20;
 
 /// The bundled font bytes, embedded in the binary. No filesystem read.
 static FONT_BYTES: &[u8] = include_bytes!("../resources/katex-typewriter-regular.ttf");
@@ -118,6 +133,42 @@ impl GlyphIndex {
     }
 }
 
+/// One point of a glyph outline, in font design units.
+///
+/// The coordinates are integers in the font grid (`units_per_em`). A point is
+/// either on the curve (a contour vertex) or off the curve (a quadratic control
+/// point); the rasterizer flattens the off-curve control points into segments.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OutlinePoint {
+    pub x: i32,
+    pub y: i32,
+    pub on_curve: bool,
+}
+
+/// A decoded glyph outline in font design units.
+///
+/// The outline is a list of closed contours, each an ordered list of points in
+/// font grid units. An empty outline (no contours) is valid: a space glyph and an
+/// unsupported composite glyph both decode to no contours, so they rasterize to a
+/// blank mask. The outline holds no pixels; scaling and filling belong to the
+/// rasterizer.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct GlyphOutline {
+    contours: Vec<Vec<OutlinePoint>>,
+}
+
+impl GlyphOutline {
+    /// The closed contours of the outline, in font design units.
+    pub fn contours(&self) -> &[Vec<OutlinePoint>] {
+        &self.contours
+    }
+
+    /// Whether the outline has no contours (a blank glyph).
+    pub fn is_empty(&self) -> bool {
+        self.contours.is_empty()
+    }
+}
+
 /// Font metrics for one pixel size, in fixed-point `LayoutUnit`.
 ///
 /// Ascent and descent are positive distances from the baseline (up and down). The
@@ -179,6 +230,8 @@ pub struct BundledFont {
     horizontal_metric_count: u16,
     advances: Vec<u16>,
     cmap: CmapSubtable,
+    glyf: Vec<u8>,
+    loca: Vec<u32>,
     accounting: AccountingRegistry,
 }
 
@@ -228,6 +281,33 @@ impl BundledFont {
         let advance_index = index.min(last) as usize;
         let advance_font_units = *self.advances.get(advance_index)?;
         scale_font_units(i32::from(advance_font_units), size, self.units_per_em)
+    }
+
+    /// The glyph count of the font.
+    pub fn glyph_count(&self) -> u16 {
+        self.glyph_count
+    }
+
+    /// The decoded outline of a glyph, in font design units.
+    ///
+    /// An out-of-range glyph index, an empty glyph (such as a space), and an
+    /// unsupported composite glyph all decode to an empty outline, so they
+    /// rasterize to a blank mask. A malformed `glyf` entry fails closed with a
+    /// typed error and never panics. The decoding is deterministic.
+    pub fn outline(&self, glyph: GlyphIndex) -> Result<GlyphOutline, FontError> {
+        let index = glyph.value() as usize;
+        if index >= self.glyph_count as usize {
+            return Ok(GlyphOutline::default());
+        }
+
+        let start = *self.loca.get(index).ok_or(FontError::MalformedTable)? as usize;
+        let end = *self.loca.get(index + 1).ok_or(FontError::MalformedTable)? as usize;
+        if end <= start {
+            return Ok(GlyphOutline::default());
+        }
+
+        let data = self.glyf.get(start..end).ok_or(FontError::MalformedTable)?;
+        parse_simple_glyph(data)
     }
 
     /// The font metrics at a pixel size, or `None` when a scaled value overflows.
@@ -364,8 +444,8 @@ fn parse(
     let mut maxp = None;
     let mut hmtx = None;
     let mut cmap = None;
-    let mut has_glyf = false;
-    let mut has_loca = false;
+    let mut glyf = None;
+    let mut loca = None;
 
     for index in 0..table_count {
         let record_offset = 12 + index * 16;
@@ -390,14 +470,10 @@ fn parse(
             b"maxp" => maxp = Some(record),
             b"hmtx" => hmtx = Some(record),
             b"cmap" => cmap = Some(record),
-            b"glyf" => has_glyf = true,
-            b"loca" => has_loca = true,
+            b"glyf" => glyf = Some(record),
+            b"loca" => loca = Some(record),
             _ => {}
         }
-    }
-
-    if !has_glyf || !has_loca {
-        return Err(FontError::MissingTable);
     }
 
     let head = head.ok_or(FontError::MissingTable)?;
@@ -405,6 +481,8 @@ fn parse(
     let maxp = maxp.ok_or(FontError::MissingTable)?;
     let hmtx = hmtx.ok_or(FontError::MissingTable)?;
     let cmap = cmap.ok_or(FontError::MissingTable)?;
+    let glyf = glyf.ok_or(FontError::MissingTable)?;
+    let loca = loca.ok_or(FontError::MissingTable)?;
 
     if head.length < 54 {
         return Err(FontError::MalformedTable);
@@ -413,6 +491,7 @@ fn parse(
     if units_per_em == 0 {
         return Err(FontError::InvalidUnitsPerEm);
     }
+    let index_to_loc_format = read_i16(bytes, head.offset + 50).ok_or(FontError::MalformedTable)?;
 
     if hhea.length < 36 {
         return Err(FontError::MalformedTable);
@@ -434,8 +513,23 @@ fn parse(
     let advances = parse_advances(bytes, &hmtx, horizontal_metric_count)?;
     let cmap = parse_cmap(bytes, &cmap)?;
 
+    let loca_offsets = parse_loca(bytes, &loca, glyph_count, index_to_loc_format)?;
+    let glyf_bytes = bytes
+        .get(glyf.offset..glyf.offset + glyf.length)
+        .ok_or(FontError::MalformedTable)?
+        .to_vec();
+    if let Some(&last) = loca_offsets.last()
+        && last as usize > glyf_bytes.len()
+    {
+        return Err(FontError::MalformedTable);
+    }
+
     let accounting = AccountingRegistry::new();
     accounting.record_allocation(Region::Fonts, parsed_data_bytes(&advances, &cmap));
+    accounting.record_allocation(
+        Region::Fonts,
+        outline_data_bytes(&glyf_bytes, &loca_offsets),
+    );
 
     Ok(BundledFont {
         handle,
@@ -448,8 +542,184 @@ fn parse(
         horizontal_metric_count,
         advances,
         cmap,
+        glyf: glyf_bytes,
+        loca: loca_offsets,
         accounting,
     })
+}
+
+/// Reads the glyph location offsets from the `loca` table.
+///
+/// The short format stores half-offsets (multiplied by two); the long format
+/// stores byte offsets directly. The table must be long enough for one entry per
+/// glyph plus a terminating entry, and the offsets must not decrease, or parsing
+/// fails closed.
+fn parse_loca(
+    bytes: &[u8],
+    loca: &TableRecord,
+    glyph_count: u16,
+    index_to_loc_format: i16,
+) -> Result<Vec<u32>, FontError> {
+    let entry_count = (glyph_count as usize)
+        .checked_add(1)
+        .ok_or(FontError::MalformedTable)?;
+    let (entry_size, is_long) = match index_to_loc_format {
+        0 => (2usize, false),
+        1 => (4usize, true),
+        _ => return Err(FontError::MalformedTable),
+    };
+    let needed = entry_count
+        .checked_mul(entry_size)
+        .ok_or(FontError::MalformedTable)?;
+    if needed > loca.length {
+        return Err(FontError::MalformedTable);
+    }
+
+    let mut offsets = Vec::with_capacity(entry_count);
+    for index in 0..entry_count {
+        let element = loca.offset + index * entry_size;
+        let value = if is_long {
+            read_u32(bytes, element).ok_or(FontError::MalformedTable)?
+        } else {
+            let half = read_u16(bytes, element).ok_or(FontError::MalformedTable)? as u32;
+            half.checked_mul(2).ok_or(FontError::MalformedTable)?
+        };
+        offsets.push(value);
+    }
+
+    if offsets.windows(2).any(|pair| pair[1] < pair[0]) {
+        return Err(FontError::MalformedTable);
+    }
+    Ok(offsets)
+}
+
+/// Decodes one simple glyph into contours of points in font design units.
+///
+/// The parser follows the TrueType `glyf` simple-glyph format: the contour end
+/// points, the flag run with its repeat encoding, then the delta-encoded x and y
+/// coordinates. Every read is bounded against the glyph data, every coordinate
+/// accumulation is checked, and the point count is capped, so malformed data fails
+/// closed without a panic. A composite glyph (a negative contour count) is not
+/// decoded at M2 and yields an empty outline.
+fn parse_simple_glyph(data: &[u8]) -> Result<GlyphOutline, FontError> {
+    let contour_count = read_i16(data, 0).ok_or(FontError::MalformedTable)?;
+    if contour_count <= 0 {
+        return Ok(GlyphOutline::default());
+    }
+    let contour_count = contour_count as usize;
+
+    let mut end_points = Vec::with_capacity(contour_count);
+    for contour in 0..contour_count {
+        let element = 10 + contour * 2;
+        end_points.push(read_u16(data, element).ok_or(FontError::MalformedTable)? as usize);
+    }
+    let last_point = *end_points.last().ok_or(FontError::MalformedTable)?;
+    let point_count = last_point
+        .checked_add(1)
+        .filter(|&count| count <= MAX_GLYPH_POINTS)
+        .ok_or(FontError::MalformedTable)?;
+
+    let instruction_length_offset = 10 + contour_count * 2;
+    let instruction_length =
+        read_u16(data, instruction_length_offset).ok_or(FontError::MalformedTable)? as usize;
+    let mut offset = instruction_length_offset
+        .checked_add(2)
+        .and_then(|value| value.checked_add(instruction_length))
+        .ok_or(FontError::MalformedTable)?;
+
+    let flags = read_glyph_flags(data, &mut offset, point_count)?;
+    let xs = read_glyph_coordinates(
+        data,
+        &mut offset,
+        &flags,
+        FLAG_X_SHORT,
+        FLAG_X_SAME_OR_POSITIVE,
+    )?;
+    let ys = read_glyph_coordinates(
+        data,
+        &mut offset,
+        &flags,
+        FLAG_Y_SHORT,
+        FLAG_Y_SAME_OR_POSITIVE,
+    )?;
+
+    let mut contours = Vec::with_capacity(contour_count);
+    let mut start = 0usize;
+    for &end in &end_points {
+        if end < start || end >= point_count {
+            return Err(FontError::MalformedTable);
+        }
+        let mut contour = Vec::with_capacity(end - start + 1);
+        for point in start..=end {
+            contour.push(OutlinePoint {
+                x: xs[point],
+                y: ys[point],
+                on_curve: flags[point] & FLAG_ON_CURVE != 0,
+            });
+        }
+        contours.push(contour);
+        start = end + 1;
+    }
+    Ok(GlyphOutline { contours })
+}
+
+/// Reads the flag run of a simple glyph, expanding the repeat encoding.
+fn read_glyph_flags(
+    data: &[u8],
+    offset: &mut usize,
+    point_count: usize,
+) -> Result<Vec<u8>, FontError> {
+    let mut flags = Vec::with_capacity(point_count);
+    while flags.len() < point_count {
+        let flag = *data.get(*offset).ok_or(FontError::MalformedTable)?;
+        *offset += 1;
+        flags.push(flag);
+        if flag & FLAG_REPEAT != 0 {
+            let repeat = *data.get(*offset).ok_or(FontError::MalformedTable)?;
+            *offset += 1;
+            for _ in 0..repeat {
+                if flags.len() >= point_count {
+                    break;
+                }
+                flags.push(flag);
+            }
+        }
+    }
+    Ok(flags)
+}
+
+/// Reads one delta-encoded coordinate axis of a simple glyph.
+///
+/// A short coordinate is one byte with its sign in the same-or-positive flag; a
+/// long coordinate is a signed 16-bit delta; a cleared short flag with a set
+/// same-or-positive flag repeats the previous value. Each accumulation is checked.
+fn read_glyph_coordinates(
+    data: &[u8],
+    offset: &mut usize,
+    flags: &[u8],
+    short_flag: u8,
+    same_or_positive_flag: u8,
+) -> Result<Vec<i32>, FontError> {
+    let mut coordinates = Vec::with_capacity(flags.len());
+    let mut value = 0i32;
+    for &flag in flags {
+        if flag & short_flag != 0 {
+            let delta = *data.get(*offset).ok_or(FontError::MalformedTable)? as i32;
+            *offset += 1;
+            let signed = if flag & same_or_positive_flag != 0 {
+                delta
+            } else {
+                -delta
+            };
+            value = value.checked_add(signed).ok_or(FontError::MalformedTable)?;
+        } else if flag & same_or_positive_flag == 0 {
+            let delta = read_i16(data, *offset).ok_or(FontError::MalformedTable)? as i32;
+            *offset += 2;
+            value = value.checked_add(delta).ok_or(FontError::MalformedTable)?;
+        }
+        coordinates.push(value);
+    }
+    Ok(coordinates)
 }
 
 /// The resident size of the owned parsed font data, in bytes.
@@ -464,6 +734,15 @@ fn parsed_data_bytes(advances: &[u16], cmap: &CmapSubtable) -> ByteCount {
         + cmap.id_range_offsets.len()
         + cmap.glyph_id_array.len();
     ByteCount::new(element_count as u64 * 2)
+}
+
+/// The resident size of the owned outline data, in bytes.
+///
+/// The glyf bytes and the resolved loca offsets are the outline allocations the
+/// font owns. Their size is accounted to the Fonts region.
+fn outline_data_bytes(glyf: &[u8], loca: &[u32]) -> ByteCount {
+    let bytes = glyf.len() as u64 + loca.len() as u64 * 4;
+    ByteCount::new(bytes)
 }
 
 /// Reads the per-glyph advance widths from `hmtx`.
@@ -668,6 +947,35 @@ mod tests {
         assert_eq!(metrics.ascent().raw(), 711);
         assert_eq!(metrics.descent().raw(), 234);
         assert_eq!(metrics.line_height().raw(), 1037);
+    }
+
+    #[test]
+    fn a_letter_glyph_decodes_to_a_non_empty_outline() {
+        let font = BundledFont::load().expect("the bundled font parses");
+        let outline = font
+            .outline(font.glyph_for('A'))
+            .expect("the glyph decodes");
+        assert!(!outline.is_empty());
+        assert_eq!(outline.contours().len(), 2);
+        assert!(outline.contours().iter().all(|contour| !contour.is_empty()));
+    }
+
+    #[test]
+    fn a_space_glyph_decodes_to_an_empty_outline() {
+        let font = BundledFont::load().expect("the bundled font parses");
+        let outline = font
+            .outline(font.glyph_for(' '))
+            .expect("the glyph decodes");
+        assert!(outline.is_empty());
+    }
+
+    #[test]
+    fn an_out_of_range_glyph_decodes_to_an_empty_outline() {
+        let font = BundledFont::load().expect("the bundled font parses");
+        let outline = font
+            .outline(GlyphIndex::new(u16::MAX))
+            .expect("an out-of-range glyph is blank");
+        assert!(outline.is_empty());
     }
 
     #[test]

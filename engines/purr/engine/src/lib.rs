@@ -34,6 +34,10 @@ mod document_store;
 mod dom_node;
 #[path = "fragment-tree.rs"]
 mod fragment_tree;
+#[path = "glyph-atlas.rs"]
+mod glyph_atlas;
+#[path = "glyph-raster.rs"]
+mod glyph_raster;
 #[path = "html-tokenizer.rs"]
 mod html_tokenizer;
 #[path = "html-tree-builder.rs"]
