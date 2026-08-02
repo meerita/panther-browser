@@ -2019,6 +2019,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "panther-browser",
+ "panther-shell",
  "panther-window",
 ]
 
@@ -2056,6 +2057,7 @@ dependencies = [
 name = "panther-shell"
 version = "0.1.0"
 dependencies = [
+ "capability-system",
  "purr-graphics",
  "purr-graphics-software",
  "raw-window-handle",
