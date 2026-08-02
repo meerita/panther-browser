@@ -16,6 +16,7 @@ members = [
     "engines/purr/graphics-wgpu",
     "foundation/capability-system",
     "foundation/locale",
+    "foundation/memory",
     "tools/localization-check",
 ]
 default-members = ["apps/panther"]
@@ -39,6 +40,7 @@ icu = { version = "2.2", features = ["compiled_data"] }
 icu_locale = "2.2"
 icu_locale_core = "2.2"
 locale = { path = "foundation/locale" }
+memory = { path = "foundation/memory" }
 panther-localization = { path = "products/panther/localization" }
 pollster = "0.4"
 purr-graphics = { path = "engines/purr/graphics" }
