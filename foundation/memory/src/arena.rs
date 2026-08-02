@@ -2,6 +2,10 @@
 // @description Defines the safe generational index arena.
 // @created Diego Martín Lafuente <meerita@icloud.com>
 
+use crate::accounting::AccountingRegistry;
+use crate::byte_count::ByteCount;
+use crate::region::Region;
+
 /// A generational identifier into an [`Arena`].
 ///
 /// The identifier pairs a slot index with a generation. It is a handle, not a
@@ -180,6 +184,41 @@ impl<T> Arena<T> {
     }
 }
 
+impl<T> Arena<T> {
+    /// Inserts a value and reports the allocation into `registry` under `region`.
+    ///
+    /// The reported amount is the size of one stored value. The arena stays
+    /// usable without a registry through [`Arena::insert`]; the registry is an
+    /// explicit handle the caller lends, not a stored or global reference.
+    pub fn insert_accounted(
+        &mut self,
+        value: T,
+        region: Region,
+        registry: &AccountingRegistry,
+    ) -> ArenaId {
+        let id = self.insert(value);
+        registry.record_allocation(region, Self::value_bytes());
+        id
+    }
+
+    /// Removes a value and, when one was present, reports the release into
+    /// `registry` under `region`.
+    pub fn remove_accounted(
+        &mut self,
+        id: ArenaId,
+        region: Region,
+        registry: &AccountingRegistry,
+    ) -> Option<T> {
+        let removed = self.remove(id)?;
+        registry.record_release(region, Self::value_bytes());
+        Some(removed)
+    }
+
+    fn value_bytes() -> ByteCount {
+        ByteCount::new(size_of::<T>() as u64)
+    }
+}
+
 impl<T> Default for Arena<T> {
     fn default() -> Self {
         Self::new()
@@ -229,6 +268,34 @@ mod tests {
 
         assert_eq!(arena.get(first), None);
         assert_eq!(arena.get(second), Some(&20));
+    }
+
+    #[test]
+    fn accounted_insert_and_remove_report_into_the_registry() {
+        use crate::accounting::AccountingRegistry;
+        use crate::byte_count::ByteCount;
+        use crate::region::Region;
+
+        let registry = AccountingRegistry::new();
+        let mut arena: Arena<u64> = Arena::new();
+        let element = ByteCount::new(size_of::<u64>() as u64);
+
+        let first = arena.insert_accounted(1, Region::Document, &registry);
+        let _second = arena.insert_accounted(2, Region::Document, &registry);
+
+        let snapshot = registry.view().region(Region::Document);
+        assert_eq!(snapshot.allocation_count, 2);
+        assert_eq!(snapshot.resident, ByteCount::new(2 * element.get()));
+        assert_eq!(snapshot.peak, ByteCount::new(2 * element.get()));
+
+        assert_eq!(
+            arena.remove_accounted(first, Region::Document, &registry),
+            Some(1)
+        );
+        let snapshot = registry.view().region(Region::Document);
+        assert_eq!(snapshot.resident, element);
+        assert_eq!(snapshot.peak, ByteCount::new(2 * element.get()));
+        assert_eq!(snapshot.allocation_count, 2);
     }
 
     #[test]

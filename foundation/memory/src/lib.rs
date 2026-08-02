@@ -18,11 +18,24 @@
 //! [`Region`] names the eight memory regions the engine divides process memory
 //! into. The short-lived regions take arena allocation; the capacity regions
 //! take budgeted byte-accounting.
+//!
+//! [`Budget`] bounds a capacity region against a [`ByteCount`] maximum, and the
+//! [`AccountingRegistry`] tracks resident and peak bytes per region and lends a
+//! read-only [`AccountingView`]. The registry is an owned value, not a global.
 
+#[path = "accounting.rs"]
+mod accounting;
 #[path = "arena.rs"]
 mod arena;
+#[path = "budget.rs"]
+mod budget;
+#[path = "byte-count.rs"]
+mod byte_count;
 #[path = "region.rs"]
 mod region;
 
+pub use accounting::{AccountingRegistry, AccountingView, RegionSnapshot};
 pub use arena::{Arena, ArenaId};
+pub use budget::{Budget, BudgetError};
+pub use byte_count::ByteCount;
 pub use region::Region;
