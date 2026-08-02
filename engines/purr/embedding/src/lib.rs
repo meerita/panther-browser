@@ -34,6 +34,10 @@ pub use engine_policy_holder::EnginePolicyHolder;
 // document without reaching the engine core.
 pub use purr_engine::{DocumentGeneration, DocumentId};
 
+// The bundled M2 demonstration document, surfaced so the product can attach it
+// without reaching the engine core or a filesystem.
+pub use purr_engine::m2_demonstration_fixture;
+
 // Engine capability identifiers surfaced as shared `CapabilityId` values so the
 // product can name an engine capability in its policy without reaching the
 // engine core.

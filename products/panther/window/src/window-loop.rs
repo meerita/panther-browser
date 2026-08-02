@@ -27,10 +27,13 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use panther_shell::{KeyInput, PointerPosition, Shell};
+use panther_shell::{KeyInput, PointerPosition, Shell, ShellRegion};
+use purr_embedding::{
+    DocumentFrame, DocumentHandle, DocumentSession, ViewportGeometry, m2_demonstration_fixture,
+};
 use purr_graphics::{
     AlphaMode, Extent2d, FrameSubmission, FrameToken, GraphicsError, MAX_TEXTURE_EXTENT,
-    PresentationTargetDescriptor, SceneGeneration, SceneId, SceneIdentity, SurfaceIdentity,
+    PresentationTargetDescriptor, Rect, SceneGeneration, SceneId, SceneIdentity, SurfaceIdentity,
     TextureFormatClass, WindowDisplayHandle, WindowSurface,
 };
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
@@ -42,6 +45,7 @@ use winit::keyboard::PhysicalKey;
 use winit::window::{Window, WindowId};
 
 use crate::active_backend::{ActiveBackend, create_active_backend};
+use crate::compositor::{CompositedDocument, composite_document, merge_submission};
 use crate::window_error::WindowError;
 
 /// Title shown on the window.
@@ -86,6 +90,13 @@ pub fn run_window() -> Result<(), WindowError> {
 /// The window is shared through an `Rc` so the software backend can retain a
 /// clone of the neutral handle for its on-screen present while the loop keeps its
 /// own reference for redraw and resize.
+///
+/// It also drives the document-attachment seam. It owns the engine session, the
+/// handle to the attached document, and the last produced frame. The frame is
+/// produced synchronously on initialize and on resize only (D6); the compositor
+/// offsets and clips it into the viewport on each redraw. The frame is absent
+/// until the first successful produce, which never happens for a degenerate
+/// (zero-area) viewport.
 struct Presentation {
     window: Rc<Window>,
     backend: ActiveBackend,
@@ -93,6 +104,9 @@ struct Presentation {
     extent: Extent2d,
     shell: Shell,
     last_cursor: Option<PointerPosition>,
+    session: DocumentSession,
+    document: DocumentHandle,
+    document_frame: Option<DocumentFrame>,
 }
 
 impl Presentation {
@@ -103,7 +117,8 @@ impl Presentation {
     /// reconfigures the surface and requests another redraw, so the caller retries
     /// on the next frame instead of failing.
     fn render(&mut self) -> Result<FrameOutcome, WindowError> {
-        let submission = shell_frame(&self.shell, self.surface, self.extent);
+        let content = self.composite_content();
+        let submission = shell_frame(&self.shell, self.surface, self.extent, content);
         self.backend
             .submit(self.surface, &submission)
             .map_err(WindowError::Backend)?;
@@ -136,8 +151,43 @@ impl Presentation {
             .map_err(WindowError::Backend)?;
         self.extent = extent;
         self.shell.resize(extent);
+        self.produce_document()?;
         self.window.request_redraw();
         Ok(())
+    }
+
+    /// Produces the document frame for the current viewport geometry (D6).
+    ///
+    /// The engine lays out in document-local space; only the content extent and
+    /// device pixel ratio cross the seam (D5). A degenerate (zero-area) viewport
+    /// produces no frame and keeps the last one, so a minimized window does not
+    /// discard a valid render. Runs on initialize and on resize only, never per
+    /// continuous frame (S1).
+    fn produce_document(&mut self) -> Result<(), WindowError> {
+        let Some(geometry) = viewport_geometry(self.viewport_rect()) else {
+            return Ok(());
+        };
+
+        let frame = self
+            .session
+            .produce(&self.document, geometry)
+            .map_err(WindowError::Document)?;
+        self.document_frame = Some(frame);
+        Ok(())
+    }
+
+    /// Offsets and clips the last document frame into the viewport (D5).
+    ///
+    /// Returns `None` when no frame has been produced or the stored frame names a
+    /// superseded generation, so a stale frame never paints (S5).
+    fn composite_content(&self) -> Option<CompositedDocument> {
+        let frame = self.document_frame.as_ref()?;
+        composite_document(frame, self.viewport_rect(), self.document.generation())
+    }
+
+    /// Current viewport rectangle in surface pixel space.
+    fn viewport_rect(&self) -> Rect {
+        self.shell.layout().rect(ShellRegion::Viewport)
     }
 
     /// Forwards a pointer move to the shell and redraws only on a state change.
@@ -244,14 +294,25 @@ impl WindowApplication {
 
         window.request_redraw();
 
-        self.presentation = Some(Presentation {
+        let mut session = DocumentSession::new();
+        let document = session
+            .attach(m2_demonstration_fixture())
+            .map_err(WindowError::Document)?;
+
+        let mut presentation = Presentation {
             window,
             backend,
             surface,
             extent,
             shell: Shell::new(extent),
             last_cursor: None,
-        });
+            session,
+            document,
+            document_frame: None,
+        };
+        presentation.produce_document()?;
+
+        self.presentation = Some(presentation);
         Ok(())
     }
 
@@ -328,28 +389,58 @@ impl ApplicationHandler for WindowApplication {
     }
 }
 
-/// Wraps the shell command list in a frame submission for a target.
+/// Merges the shell chrome and the composited document into one submission.
 ///
 /// The shell builds the ordered `Clear` and `FillRect` list for its current
-/// chrome state (D1); this function pairs that list with the owned surface
-/// identity and the current extent the backend expects.
-fn shell_frame(shell: &Shell, surface: SurfaceIdentity, extent: Extent2d) -> FrameSubmission {
-    FrameSubmission {
-        frame_token: FrameToken::new(1),
-        scene: SceneIdentity::new(
-            SceneId::new(1),
-            SceneGeneration::new(1),
-            surface.surface_id(),
-            surface.surface_generation(),
-        ),
-        target: PresentationTargetDescriptor {
-            extent,
-            format: TextureFormatClass::Bgra8Unorm,
-            alpha_mode: AlphaMode::Opaque,
-        },
-        uploads: Vec::new(),
-        commands: shell.build_commands(),
+/// chrome state (D1); the compositor offsets and clips the document into the
+/// viewport (D5). This function merges both into one submission for the owned
+/// surface and the current extent. The document paints over the chrome viewport
+/// fill, so it is visible without removing the chrome region.
+fn shell_frame(
+    shell: &Shell,
+    surface: SurfaceIdentity,
+    extent: Extent2d,
+    content: Option<CompositedDocument>,
+) -> FrameSubmission {
+    let scene = SceneIdentity::new(
+        SceneId::new(1),
+        SceneGeneration::new(1),
+        surface.surface_id(),
+        surface.surface_generation(),
+    );
+    let target = PresentationTargetDescriptor {
+        extent,
+        format: TextureFormatClass::Bgra8Unorm,
+        alpha_mode: AlphaMode::Opaque,
+    };
+
+    merge_submission(
+        shell.build_commands(),
+        content,
+        FrameToken::new(1),
+        scene,
+        target,
+    )
+}
+
+/// Derives the viewport geometry for one render from the viewport rectangle.
+///
+/// The content extent is the rounded viewport size in surface pixels; the device
+/// pixel ratio is 1.0 on the M2 path. A rectangle that rounds to a zero width or
+/// height has no content box and yields `None`, so the caller keeps the last
+/// produced frame instead of producing an empty one.
+fn viewport_geometry(viewport: Rect) -> Option<ViewportGeometry> {
+    let width = viewport.width.round();
+    let height = viewport.height.round();
+
+    if width < 1.0 || height < 1.0 {
+        return None;
     }
+
+    Some(ViewportGeometry {
+        content_extent: Extent2d::new(width as u32, height as u32),
+        device_pixel_ratio: 1.0,
+    })
 }
 
 /// Converts a native pointer position into the neutral shell pointer position.

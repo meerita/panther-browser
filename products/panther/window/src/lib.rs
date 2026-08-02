@@ -17,6 +17,8 @@
 
 #[path = "active-backend.rs"]
 mod active_backend;
+#[path = "compositor.rs"]
+mod compositor;
 #[path = "window-error.rs"]
 mod window_error;
 #[path = "window-loop.rs"]

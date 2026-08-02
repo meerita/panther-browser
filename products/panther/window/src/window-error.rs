@@ -9,6 +9,7 @@
 //! backend source is the Panther-owned interface error, never a raw backend or
 //! native-API type.
 
+use purr_embedding::SeamError;
 use purr_graphics::GraphicsError;
 use winit::error::{EventLoopError, OsError};
 
@@ -25,4 +26,6 @@ pub enum WindowError {
     InvalidSurfaceExtent,
     #[error("the graphics backend failed")]
     Backend(#[source] GraphicsError),
+    #[error("the document engine failed")]
+    Document(#[source] SeamError),
 }

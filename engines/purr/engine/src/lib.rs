@@ -28,6 +28,8 @@ mod computed_style;
 mod css_parser;
 #[path = "css-tokenizer.rs"]
 mod css_tokenizer;
+#[path = "demonstration-fixture.rs"]
+mod demonstration_fixture;
 #[path = "document-store.rs"]
 mod document_store;
 #[path = "dom-node.rs"]
@@ -65,6 +67,7 @@ pub use capability_declarations::{
     AUTHOR_STYLES, GPU_ACCELERATION, SERVICE_WORKERS, USER_AGENT_STYLES, WEBGPU,
     engine_capabilities,
 };
+pub use demonstration_fixture::m2_demonstration_fixture;
 pub use document_store::{
     DocumentError, DocumentGeneration, DocumentId, DocumentStore, EngineFrame, MAX_SOURCE_BYTES,
     engine_producer_namespace,
