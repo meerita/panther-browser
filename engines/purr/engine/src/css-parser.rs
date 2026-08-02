@@ -92,6 +92,53 @@ pub enum PropertyId {
     LineHeight,
 }
 
+impl PropertyId {
+    /// Every property of the M2 set in a stable index order.
+    ///
+    /// The cascade and computed-style phase indexes a dense per-property array by
+    /// `index`, and iterates the set through this array.
+    pub const ALL: [PropertyId; 16] = [
+        PropertyId::Display,
+        PropertyId::Width,
+        PropertyId::Height,
+        PropertyId::MarginTop,
+        PropertyId::MarginRight,
+        PropertyId::MarginBottom,
+        PropertyId::MarginLeft,
+        PropertyId::PaddingTop,
+        PropertyId::PaddingRight,
+        PropertyId::PaddingBottom,
+        PropertyId::PaddingLeft,
+        PropertyId::BackgroundColor,
+        PropertyId::Color,
+        PropertyId::FontSize,
+        PropertyId::FontFamily,
+        PropertyId::LineHeight,
+    ];
+
+    /// The dense index of this property, matching its position in `ALL`.
+    pub fn index(self) -> usize {
+        match self {
+            PropertyId::Display => 0,
+            PropertyId::Width => 1,
+            PropertyId::Height => 2,
+            PropertyId::MarginTop => 3,
+            PropertyId::MarginRight => 4,
+            PropertyId::MarginBottom => 5,
+            PropertyId::MarginLeft => 6,
+            PropertyId::PaddingTop => 7,
+            PropertyId::PaddingRight => 8,
+            PropertyId::PaddingBottom => 9,
+            PropertyId::PaddingLeft => 10,
+            PropertyId::BackgroundColor => 11,
+            PropertyId::Color => 12,
+            PropertyId::FontSize => 13,
+            PropertyId::FontFamily => 14,
+            PropertyId::LineHeight => 15,
+        }
+    }
+}
+
 /// Specificity of one selector as a non-overflowing triple.
 ///
 /// The fields are ordered id, class, then type, so the derived ordering compares

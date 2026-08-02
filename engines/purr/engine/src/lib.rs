@@ -18,6 +18,8 @@
 
 #[path = "capability-declarations.rs"]
 mod capability_declarations;
+#[path = "computed-style.rs"]
+mod computed_style;
 #[path = "css-parser.rs"]
 mod css_parser;
 #[path = "css-tokenizer.rs"]
@@ -34,6 +36,8 @@ mod html_tree_builder;
 mod mock_providers;
 #[path = "platform-support.rs"]
 mod platform_support;
+#[path = "style-cascade.rs"]
+mod style_cascade;
 #[path = "user-agent-styles.rs"]
 mod user_agent_styles;
 
