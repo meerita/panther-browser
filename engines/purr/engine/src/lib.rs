@@ -32,6 +32,8 @@ mod dom_node;
 mod html_tokenizer;
 #[path = "html-tree-builder.rs"]
 mod html_tree_builder;
+#[path = "layout-unit.rs"]
+mod layout_unit;
 #[path = "mock-providers.rs"]
 mod mock_providers;
 #[path = "platform-support.rs"]
