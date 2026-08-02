@@ -8,8 +8,17 @@
 //! framebuffers. It allocates a byte buffer per presentation target and per
 //! texture from a validated descriptor, applies resource uploads, and rasterizes
 //! the fixed M0 command set (`Clear`, `FillRect`, `TexturedQuad`) into the target
-//! buffer during `submit`. `present` marks the buffer presented; there is no
-//! display output at M0.
+//! buffer during `submit`. When the target carries an owned window handle,
+//! `present` blits the framebuffer to the window through `softbuffer`; a target
+//! created without a handle stays headless and only marks the buffer presented.
+//!
+//! # Present path
+//!
+//! `softbuffer` is confined to this crate. It is a windowing-present library that
+//! copies the target's own framebuffer bytes to the window; it processes no remote
+//! data. The present converts each texel from the target format channel order to
+//! the `softbuffer` `0RGB` `u32` pixel, with checked size arithmetic, and fails
+//! closed on an invalid extent or a buffer-length mismatch.
 //!
 //! # Determinism contract
 //!
@@ -36,14 +45,18 @@
 //!   component is stored directly in the target format channel order.
 
 use std::collections::HashMap;
+use std::fmt;
+use std::num::NonZeroU32;
+use std::rc::Rc;
 
 use purr_graphics::{
     BackendKind, Color, DeviceGeneration, DrawCommand, Extent2d, FrameSubmission,
     GpuResourceIdentity, GraphicsBackend, GraphicsError, PresentationTargetDescriptor,
     ProducerNamespace, Rect, ResourceGeneration, ResourceId, ResourceKind, ResourceUpload,
     SurfaceGeneration, SurfaceId, SurfaceIdentity, TextureDescriptor, TextureFormatClass,
-    WindowSurface,
+    WindowDisplayHandle, WindowSurface,
 };
+use softbuffer::{Context, Surface};
 
 /// Producer namespace this backend stamps on the identities it creates.
 ///
@@ -54,17 +67,39 @@ const BACKEND_NAMESPACE: u32 = 1;
 /// bytes; `channel_order` guards the assumption with an exhaustive match.
 const BYTES_PER_TEXEL: u32 = 4;
 
+/// Shared neutral handle type the on-screen present retains.
+///
+/// Both the `softbuffer` context and surface are parameterized by this one shared
+/// handle, so the retained surface owns a clone of the window and keeps it alive
+/// for its own lifetime. The type names only the neutral seam trait behind an
+/// `Rc`; no `winit` or platform window type appears here.
+type SharedHandle = Rc<dyn WindowDisplayHandle>;
+
+/// Retained `softbuffer` present state for one on-screen target.
+///
+/// The context and surface are retained so a later `present` can blit without a
+/// second `unsafe` site and without a self-referential borrow. `softbuffer`
+/// `Surface` does not borrow the `Context`, so both are held side by side. The
+/// context is kept alive for the surface lifetime and is not read after
+/// construction.
+struct WindowPresenter {
+    _context: Context<SharedHandle>,
+    surface: Surface<SharedHandle, SharedHandle>,
+}
+
 /// One CPU presentation target owned by the backend.
 ///
 /// The `pixels` buffer holds tightly packed rows in top-to-bottom order, four
 /// bytes per texel, in the target format channel order. The allocation is reused
-/// across frames; a `Clear` command fills it in place.
-#[derive(Debug)]
+/// across frames; a `Clear` command fills it in place. `presenter` is present
+/// only when the target was created with an owned window handle; a headless
+/// target leaves it `None`.
 struct SoftwareFramebuffer {
     extent: Extent2d,
     order: [usize; 4],
     pixels: Vec<u8>,
     presented: bool,
+    presenter: Option<WindowPresenter>,
 }
 
 /// One CPU texture owned by the backend.
@@ -79,13 +114,24 @@ struct SoftwareTexture {
 }
 
 /// Software backend that rasterizes the M0 command set on the CPU.
-#[derive(Debug)]
 pub struct SoftwareBackend {
     device_generation: DeviceGeneration,
     targets: HashMap<SurfaceIdentity, SoftwareFramebuffer>,
     resources: HashMap<GpuResourceIdentity, SoftwareTexture>,
     next_surface_id: u64,
     next_resource_id: u64,
+}
+
+impl fmt::Debug for SoftwareBackend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SoftwareBackend")
+            .field("device_generation", &self.device_generation)
+            .field("targets", &self.targets.len())
+            .field("resources", &self.resources.len())
+            .field("next_surface_id", &self.next_surface_id)
+            .field("next_resource_id", &self.next_resource_id)
+            .finish()
+    }
 }
 
 impl SoftwareBackend {
@@ -215,12 +261,17 @@ impl GraphicsBackend for SoftwareBackend {
 
     fn create_presentation_target(
         &mut self,
-        _surface: WindowSurface<'_>,
+        surface: WindowSurface<'_>,
         descriptor: PresentationTargetDescriptor,
     ) -> Result<SurfaceIdentity, GraphicsError> {
         validate_extent(descriptor.extent)?;
         let length = buffer_length(descriptor.extent)?;
         let order = channel_order(descriptor.format);
+
+        let presenter = match surface.owned_handle() {
+            Some(handle) => Some(WindowPresenter::new(handle)?),
+            None => None,
+        };
 
         let identity = self.next_surface_identity();
         self.targets.insert(
@@ -230,6 +281,7 @@ impl GraphicsBackend for SoftwareBackend {
                 order,
                 pixels: vec![0u8; length],
                 presented: false,
+                presenter,
             },
         );
 
@@ -253,6 +305,10 @@ impl GraphicsBackend for SoftwareBackend {
         target.pixels.clear();
         target.pixels.resize(length, 0);
         target.presented = false;
+
+        if let Some(presenter) = target.presenter.as_mut() {
+            presenter.resize(extent)?;
+        }
 
         Ok(())
     }
@@ -308,8 +364,88 @@ impl GraphicsBackend for SoftwareBackend {
             .targets
             .get_mut(&surface)
             .ok_or(GraphicsError::ResourceNotFound)?;
+
+        if let Some(presenter) = target.presenter.as_mut() {
+            presenter.blit(target.extent, &target.pixels, target.order)?;
+        }
+
         target.presented = true;
         Ok(())
+    }
+}
+
+impl WindowPresenter {
+    /// Builds the retained `softbuffer` context and surface from a shared handle.
+    ///
+    /// A failure to reach the platform window or display maps to `Unsupported`:
+    /// the backend cannot present on screen for this window. This runs once per
+    /// target, not per frame.
+    fn new(handle: SharedHandle) -> Result<Self, GraphicsError> {
+        let context = Context::new(Rc::clone(&handle)).map_err(|_| GraphicsError::Unsupported)?;
+        let surface = Surface::new(&context, handle).map_err(|_| GraphicsError::Unsupported)?;
+        Ok(Self {
+            _context: context,
+            surface,
+        })
+    }
+
+    /// Resizes the retained surface to a validated extent.
+    ///
+    /// The extent already passed the target validation, so both dimensions are
+    /// nonzero; the `NonZeroU32` construction is a defensive guard. A surface
+    /// failure is transient and maps to `SubmissionRejected`, so the window loop
+    /// reconfigures and retries.
+    fn resize(&mut self, extent: Extent2d) -> Result<(), GraphicsError> {
+        let width = NonZeroU32::new(extent.width).ok_or(GraphicsError::InvalidDescriptor)?;
+        let height = NonZeroU32::new(extent.height).ok_or(GraphicsError::InvalidDescriptor)?;
+        self.surface
+            .resize(width, height)
+            .map_err(|_| GraphicsError::SubmissionRejected)
+    }
+
+    /// Copies the framebuffer to the window and presents it.
+    ///
+    /// The pixel count and the expected byte length are computed with checked
+    /// arithmetic and validated against the framebuffer before the copy. Each
+    /// texel converts from the target format channel order to the `softbuffer`
+    /// `0RGB` `u32`. A surface failure maps to `SubmissionRejected`.
+    fn blit(
+        &mut self,
+        extent: Extent2d,
+        pixels: &[u8],
+        order: [usize; 4],
+    ) -> Result<(), GraphicsError> {
+        let pixel_count = usize::try_from(
+            u64::from(extent.width)
+                .checked_mul(u64::from(extent.height))
+                .ok_or(GraphicsError::InvalidDescriptor)?,
+        )
+        .map_err(|_| GraphicsError::InvalidDescriptor)?;
+
+        let byte_length = pixel_count
+            .checked_mul(BYTES_PER_TEXEL as usize)
+            .ok_or(GraphicsError::InvalidDescriptor)?;
+        if pixels.len() != byte_length {
+            return Err(GraphicsError::InvalidDescriptor);
+        }
+
+        self.resize(extent)?;
+
+        let mut buffer = self
+            .surface
+            .buffer_mut()
+            .map_err(|_| GraphicsError::SubmissionRejected)?;
+        if buffer.len() != pixel_count {
+            return Err(GraphicsError::SubmissionRejected);
+        }
+
+        for (texel, slot) in pixels.chunks_exact(4).zip(buffer.iter_mut()) {
+            *slot = texel_to_display_pixel(texel, order);
+        }
+
+        buffer
+            .present()
+            .map_err(|_| GraphicsError::SubmissionRejected)
     }
 }
 
@@ -644,6 +780,20 @@ fn write_rgba(texel: &mut [u8], order: [usize; 4], rgba: [u8; 4]) {
     texel[order[3]] = rgba[3];
 }
 
+/// Converts a target-format texel to the `softbuffer` `0RGB` `u32` pixel.
+///
+/// The texel is read into canonical RGBA in the target format channel order, then
+/// packed as `0RGB`: the high 8 bits are zero, then red, green, and blue in the
+/// low 24 bits. The alpha channel is dropped because the window presents an opaque
+/// surface. The function is pure, so it is tested without a window.
+fn texel_to_display_pixel(texel: &[u8], order: [usize; 4]) -> u32 {
+    let rgba = read_rgba(texel, order);
+    let red = u32::from(rgba[0]);
+    let green = u32::from(rgba[1]);
+    let blue = u32::from(rgba[2]);
+    (red << 16) | (green << 8) | blue
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -738,6 +888,36 @@ mod tests {
         assert_eq!(
             SoftwareBackend::create(BackendKind::Hardware).unwrap_err(),
             GraphicsError::Unsupported
+        );
+    }
+
+    #[test]
+    fn display_pixel_packs_rgba_and_drops_alpha() {
+        let order = channel_order(TextureFormatClass::Rgba8Unorm);
+
+        assert_eq!(
+            texel_to_display_pixel(&[0x30, 0x20, 0x10, 0x7F], order),
+            0x0030_2010
+        );
+    }
+
+    #[test]
+    fn display_pixel_reads_bgra_channel_order() {
+        let order = channel_order(TextureFormatClass::Bgra8Unorm);
+
+        assert_eq!(
+            texel_to_display_pixel(&[0x10, 0x20, 0x30, 0xFF], order),
+            0x0030_2010
+        );
+    }
+
+    #[test]
+    fn display_pixel_keeps_zero_high_byte_for_full_white() {
+        let order = channel_order(TextureFormatClass::Rgba8Unorm);
+
+        assert_eq!(
+            texel_to_display_pixel(&[0xFF, 0xFF, 0xFF, 0xFF], order),
+            0x00FF_FFFF
         );
     }
 

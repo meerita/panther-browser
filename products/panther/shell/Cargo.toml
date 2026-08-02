@@ -1,9 +1,9 @@
-# @file products/panther/window/Cargo.toml
-# @description Declares the Panther windowing seam and window integration package.
+# @file products/panther/shell/Cargo.toml
+# @description Declares the Panther shell chrome model, layout, and draw package.
 # @created Diego Martín Lafuente <meerita@icloud.com>
 
 [package]
-name = "panther-window"
+name = "panther-shell"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,10 +13,9 @@ publish = false
 workspace = true
 
 [dependencies]
-panther-shell.workspace = true
+capability-system.workspace = true
 purr-graphics.workspace = true
-purr-graphics-wgpu = { path = "../../../engines/purr/graphics-wgpu" }
+
+[dev-dependencies]
 purr-graphics-software = { path = "../../../engines/purr/graphics-software" }
-winit.workspace = true
 raw-window-handle.workspace = true
-thiserror.workspace = true

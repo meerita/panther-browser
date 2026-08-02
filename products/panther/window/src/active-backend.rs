@@ -76,10 +76,6 @@ impl ActiveBackend {
             Self::Software(backend) => backend.present(surface),
         }
     }
-
-    pub(crate) fn is_software(&self) -> bool {
-        matches!(self, Self::Software(_))
-    }
 }
 
 /// Chooses the backend kind from a hardware-probe result.

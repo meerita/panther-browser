@@ -27,7 +27,7 @@ mod identity;
 #[path = "submission.rs"]
 mod submission;
 
-pub use backend::{BackendKind, GraphicsBackend, WindowSurface};
+pub use backend::{BackendKind, GraphicsBackend, WindowDisplayHandle, WindowSurface};
 pub use backend_selection::select_backend;
 
 pub use descriptor::{
