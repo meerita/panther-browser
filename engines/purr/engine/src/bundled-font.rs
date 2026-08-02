@@ -24,6 +24,7 @@
 #![allow(dead_code)]
 
 use crate::layout_unit::LayoutUnit;
+use memory::{AccountingRegistry, ByteCount, Region};
 
 /// Upper bound for the number of tables in the font directory.
 ///
@@ -165,7 +166,8 @@ pub enum FontError {
 /// The bundled font, with the parsed metrics, advances, and Unicode cmap.
 ///
 /// All fields are owned and immutable after loading. The struct retains no raw
-/// byte slice: it holds only the parsed data the M2 path needs.
+/// byte slice: it holds only the parsed data the M2 path needs. The owned parsed
+/// data is accounted to the Fonts memory region.
 pub struct BundledFont {
     handle: FontHandle,
     visibility: FontVisibility,
@@ -177,6 +179,7 @@ pub struct BundledFont {
     horizontal_metric_count: u16,
     advances: Vec<u16>,
     cmap: CmapSubtable,
+    accounting: AccountingRegistry,
 }
 
 impl BundledFont {
@@ -201,6 +204,11 @@ impl BundledFont {
     /// The font design grid size (font units per em).
     pub fn units_per_em(&self) -> u16 {
         self.units_per_em
+    }
+
+    /// The resident bytes the parsed font data holds in the Fonts region.
+    pub fn resident_font_bytes(&self) -> ByteCount {
+        self.accounting.view().region(Region::Fonts).resident
     }
 
     /// The glyph a code point maps to, or [`GlyphIndex::NOTDEF`] when the font has
@@ -426,6 +434,9 @@ fn parse(
     let advances = parse_advances(bytes, &hmtx, horizontal_metric_count)?;
     let cmap = parse_cmap(bytes, &cmap)?;
 
+    let accounting = AccountingRegistry::new();
+    accounting.record_allocation(Region::Fonts, parsed_data_bytes(&advances, &cmap));
+
     Ok(BundledFont {
         handle,
         visibility,
@@ -437,7 +448,22 @@ fn parse(
         horizontal_metric_count,
         advances,
         cmap,
+        accounting,
     })
+}
+
+/// The resident size of the owned parsed font data, in bytes.
+///
+/// The advances and the cmap segment arrays are the heap allocations the font
+/// owns. Their size is accounted to the Fonts region.
+fn parsed_data_bytes(advances: &[u16], cmap: &CmapSubtable) -> ByteCount {
+    let element_count = advances.len()
+        + cmap.end_codes.len()
+        + cmap.start_codes.len()
+        + cmap.id_deltas.len()
+        + cmap.id_range_offsets.len()
+        + cmap.glyph_id_array.len();
+    ByteCount::new(element_count as u64 * 2)
 }
 
 /// Reads the per-glyph advance widths from `hmtx`.
@@ -602,6 +628,12 @@ mod tests {
         assert_eq!(font.handle().id().value(), 1);
         assert_eq!(font.handle().generation().value(), 1);
         assert_eq!(font.units_per_em(), 1000);
+    }
+
+    #[test]
+    fn parsed_font_data_is_accounted_to_the_fonts_region() {
+        let font = BundledFont::load().expect("the bundled font parses");
+        assert!(font.resident_font_bytes().get() > 0);
     }
 
     #[test]
