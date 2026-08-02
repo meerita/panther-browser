@@ -34,6 +34,18 @@ const ADDRESS_FIELD_COLOR: Color = Color::new(0.24, 0.25, 0.28, 1.0);
 const TAB_COLOR: Color = Color::new(0.28, 0.30, 0.34, 1.0);
 const VIEWPORT_COLOR: Color = Color::new(0.94, 0.95, 0.96, 1.0);
 
+/// Fill applied to the region under the pointer.
+///
+/// One flat color makes hover visible for any region (D3). It is distinct from
+/// every base color, so the hover state reads clearly.
+const HOVER_COLOR: Color = Color::new(0.50, 0.52, 0.56, 1.0);
+
+/// Fill applied to the region that receives key input.
+///
+/// One accent color marks the focused region (D3). It is distinct from every
+/// base color and the hover color, so the focus state reads clearly.
+const FOCUS_COLOR: Color = Color::new(0.20, 0.45, 0.85, 1.0);
+
 impl ShellRegion {
     /// Every region in fixed order, top bar first and viewport last.
     ///
@@ -62,6 +74,22 @@ impl ShellRegion {
             ShellRegion::AddressField => ADDRESS_FIELD_COLOR,
             ShellRegion::Tab => TAB_COLOR,
             ShellRegion::Viewport => VIEWPORT_COLOR,
+        }
+    }
+
+    /// Display color for the region given its interaction state.
+    ///
+    /// Focus takes precedence over hover, so a region that is both focused and
+    /// hovered shows the focus color. A region with neither state shows its base
+    /// color. The colors are placeholders that only make the state visible
+    /// (D1, D3).
+    pub const fn display_color(self, is_hovered: bool, is_focused: bool) -> Color {
+        if is_focused {
+            FOCUS_COLOR
+        } else if is_hovered {
+            HOVER_COLOR
+        } else {
+            self.base_color()
         }
     }
 }

@@ -2,8 +2,9 @@
 // @description Owns the shell interaction state and routes pointer and key input.
 // @created Diego Martín Lafuente <meerita@icloud.com>
 
-use purr_graphics::Extent2d;
+use purr_graphics::{DrawCommand, Extent2d};
 
+use crate::draw_command_builder::build_commands;
 use crate::pointer_hit_test::{PointerPosition, hit_test};
 use crate::region_layout::{RegionLayout, layout};
 use crate::shell_region::ShellRegion;
@@ -125,6 +126,15 @@ impl Shell {
     /// Region that receives key input, if any.
     pub fn focused(&self) -> Option<ShellRegion> {
         self.focused
+    }
+
+    /// Ordered draw-command list that paints the current chrome state.
+    ///
+    /// The list reflects the current layout, hover, and focus, so the window
+    /// paints exactly the state the shell holds (D5). The command set is `Clear`
+    /// and `FillRect` only (D1).
+    pub fn build_commands(&self) -> Vec<DrawCommand> {
+        build_commands(&self.layout, self.hovered, self.focused)
     }
 }
 
