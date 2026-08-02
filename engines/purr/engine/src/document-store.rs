@@ -16,6 +16,7 @@
 //! pipeline phases replace the render body without changing these identities or
 //! the raw-output shape.
 
+use crate::dom_node::Dom;
 use memory::{AccountingRegistry, Arena, ArenaId, Region};
 use purr_graphics::{Color, DrawCommand, Extent2d, ProducerNamespace, ResourceUpload};
 
@@ -105,15 +106,18 @@ pub struct EngineFrame {
 
 /// One document owned by the store.
 ///
-/// At this phase the document holds only its source bytes and the generation it
-/// was created with. Later phases add the DOM, style, layout, and paint state
-/// behind the same identity.
+/// At this phase the document holds its source bytes, the generation it was
+/// created with, and an empty DOM tree. Later phases add the style, layout, and
+/// paint state behind the same identity.
 struct Document {
     generation: DocumentGeneration,
-    // The tokenizer phase reads the source; the store owns the bytes now so the
-    // seam holds them behind a stable identity.
+    // The tokenizer reads the source and the tree builder fills the DOM; both are
+    // later phases. The store owns them now so the seam holds them behind a
+    // stable identity.
     #[allow(dead_code)]
     source: Vec<u8>,
+    #[allow(dead_code)]
+    dom: Dom,
 }
 
 /// Owns every attached document and issues opaque handles to them.
@@ -159,6 +163,7 @@ impl DocumentStore {
         let document = Document {
             generation,
             source: source.to_vec(),
+            dom: Dom::new(),
         };
         let id = self
             .documents

@@ -20,6 +20,8 @@
 mod capability_declarations;
 #[path = "document-store.rs"]
 mod document_store;
+#[path = "dom-node.rs"]
+mod dom_node;
 #[path = "mock-providers.rs"]
 mod mock_providers;
 #[path = "platform-support.rs"]
