@@ -16,6 +16,8 @@
 //! pipeline output the embedding seam wraps. The store surfaces opaque document
 //! identities the seam re-exports as handle components.
 
+#[path = "block-layout.rs"]
+mod block_layout;
 #[path = "bundled-font.rs"]
 mod bundled_font;
 #[path = "capability-declarations.rs"]
@@ -34,6 +36,8 @@ mod dom_node;
 mod html_tokenizer;
 #[path = "html-tree-builder.rs"]
 mod html_tree_builder;
+#[path = "layout-tree.rs"]
+mod layout_tree;
 #[path = "layout-unit.rs"]
 mod layout_unit;
 #[path = "mock-providers.rs"]

@@ -230,6 +230,23 @@ impl LogicalSize {
     }
 }
 
+/// A rectangle in document-local logical space.
+///
+/// The origin is the top-left corner and the size is the border-box extent.
+/// Layout produces fragment rectangles in this form, in document-local
+/// coordinates with the document origin at `(0, 0)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct LogicalRect {
+    pub origin: LogicalPoint,
+    pub size: LogicalSize,
+}
+
+impl LogicalRect {
+    pub const fn new(origin: LogicalPoint, size: LogicalSize) -> Self {
+        Self { origin, size }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
