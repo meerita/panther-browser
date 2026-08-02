@@ -18,6 +18,10 @@
 
 #[path = "capability-declarations.rs"]
 mod capability_declarations;
+#[path = "css-parser.rs"]
+mod css_parser;
+#[path = "css-tokenizer.rs"]
+mod css_tokenizer;
 #[path = "document-store.rs"]
 mod document_store;
 #[path = "dom-node.rs"]
@@ -30,6 +34,8 @@ mod html_tree_builder;
 mod mock_providers;
 #[path = "platform-support.rs"]
 mod platform_support;
+#[path = "user-agent-styles.rs"]
+mod user_agent_styles;
 
 pub use capability_declarations::{
     AUTHOR_STYLES, GPU_ACCELERATION, SERVICE_WORKERS, USER_AGENT_STYLES, WEBGPU,
