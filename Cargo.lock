@@ -2030,6 +2030,7 @@ dependencies = [
  "capability-system",
  "panther-localization",
  "purr-embedding",
+ "purr-graphics",
  "thiserror 2.0.19",
 ]
 
