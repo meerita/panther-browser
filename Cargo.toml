@@ -15,6 +15,7 @@ members = [
     "engines/purr/graphics",
     "engines/purr/graphics-software",
     "engines/purr/graphics-wgpu",
+    "engines/purr/text",
     "foundation/capability-system",
     "foundation/locale",
     "foundation/memory",
@@ -46,6 +47,7 @@ panther-localization = { path = "products/panther/localization" }
 panther-shell = { path = "products/panther/shell" }
 pollster = "0.4"
 purr-graphics = { path = "engines/purr/graphics" }
+purr-text = { path = "engines/purr/text" }
 raw-window-handle = { version = "0.6", features = ["alloc"] }
 rust-embed = "8"
 softbuffer = "0.4"

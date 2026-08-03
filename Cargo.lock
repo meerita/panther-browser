@@ -2291,6 +2291,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "purr-text"
+version = "0.1.0"
+dependencies = [
+ "memory",
+ "purr-graphics",
+]
+
+[[package]]
 name = "quick-xml"
 version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

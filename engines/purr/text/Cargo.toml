@@ -1,0 +1,17 @@
+# @file engines/purr/text/Cargo.toml
+# @description Declares the neutral Purr text primitive package.
+# @created Diego Martín Lafuente <meerita@icloud.com>
+
+[package]
+name = "purr-text"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+memory.workspace = true
+purr-graphics.workspace = true
