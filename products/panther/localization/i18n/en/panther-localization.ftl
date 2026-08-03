@@ -10,6 +10,20 @@ window-title = Panther
 # The action that opens a new browsing tab.
 window-new-tab = New Tab
 
+## Toolbar.
+
+# The action that navigates to the previous page in history.
+toolbar-back = Back
+
+# The action that navigates to the next page in history.
+toolbar-forward = Forward
+
+# The action that reloads the current page.
+toolbar-reload = Reload
+
+# The placeholder text in the empty address field.
+address-placeholder = Search or enter address
+
 ## Permission prompts.
 
 # Title of the camera permission prompt.
