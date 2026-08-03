@@ -24,6 +24,9 @@ mod glyph_raster;
 #[path = "text-shaping.rs"]
 mod text_shaping;
 
+#[path = "glyph-atlas.rs"]
+mod glyph_atlas;
+
 pub use pixel_unit::{FRACTION_BITS, ONE_PX_RAW, TextUnit};
 
 pub use bundled_font::{
@@ -36,4 +39,8 @@ pub use glyph_raster::{GlyphMask, MAX_GLYPH_EXTENT, RasterError, rasterize_glyph
 pub use text_shaping::{
     CmapOneToOneAdapter, GlyphRun, GlyphRunGeneration, GlyphRunId, GlyphRunSlice,
     MAX_SHAPED_SCALARS, PositionedGlyph, ShapingError, ShapingRequest, TextShapingAdapter,
+};
+
+pub use glyph_atlas::{
+    GlyphAtlas, GlyphAtlasError, GlyphKey, GlyphPlacement, TexelRect, build_glyph_atlas,
 };
