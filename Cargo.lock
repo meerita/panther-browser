@@ -2041,6 +2041,9 @@ dependencies = [
  "locale",
  "panther-localization",
  "panther-shell",
+ "purr-graphics",
+ "purr-text",
+ "thiserror 2.0.19",
 ]
 
 [[package]]

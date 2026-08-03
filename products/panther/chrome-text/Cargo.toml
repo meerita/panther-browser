@@ -13,8 +13,9 @@ publish = false
 workspace = true
 
 [dependencies]
+locale.workspace = true
 panther-localization.workspace = true
 panther-shell.workspace = true
-
-[dev-dependencies]
-locale.workspace = true
+purr-graphics.workspace = true
+purr-text.workspace = true
+thiserror.workspace = true

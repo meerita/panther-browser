@@ -16,4 +16,8 @@
 #[path = "label-set.rs"]
 mod label_set;
 
+#[path = "producer.rs"]
+mod producer;
+
 pub use label_set::{ChromeLabels, resolve_labels};
+pub use producer::{ChromeText, ChromeTextError, ChromeTextView};

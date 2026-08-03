@@ -38,6 +38,16 @@ impl ChromeLabels {
     pub fn generation(&self) -> LocaleGeneration {
         self.generation
     }
+
+    /// The resolved region-to-string entries.
+    ///
+    /// The accessor stays crate-internal: the producer shapes these strings and
+    /// exposes only the neutral glyph geometry, so the prose never crosses the
+    /// crate boundary into the prose-free shell. It also lets the producer cache
+    /// compare the resolved label set to decide whether a rebuild is required.
+    pub(crate) fn entries(&self) -> &[(ShellRegion, String); 4] {
+        &self.entries
+    }
 }
 
 impl fmt::Debug for ChromeLabels {
