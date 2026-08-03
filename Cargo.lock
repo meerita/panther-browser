@@ -2019,6 +2019,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "panther-browser",
+ "panther-chrome-text",
+ "panther-localization",
  "panther-shell",
  "panther-window",
 ]
@@ -2031,6 +2033,18 @@ dependencies = [
  "panther-localization",
  "purr-embedding",
  "purr-graphics",
+ "thiserror 2.0.19",
+]
+
+[[package]]
+name = "panther-chrome-text"
+version = "0.1.0"
+dependencies = [
+ "locale",
+ "panther-localization",
+ "panther-shell",
+ "purr-graphics",
+ "purr-text",
  "thiserror 2.0.19",
 ]
 
@@ -2061,6 +2075,7 @@ dependencies = [
  "capability-system",
  "purr-graphics",
  "purr-graphics-software",
+ "purr-text",
  "raw-window-handle",
 ]
 
@@ -2068,7 +2083,10 @@ dependencies = [
 name = "panther-window"
 version = "0.1.0"
 dependencies = [
+ "locale",
  "panther-browser",
+ "panther-chrome-text",
+ "panther-localization",
  "panther-shell",
  "purr-embedding",
  "purr-graphics",

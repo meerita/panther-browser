@@ -8,11 +8,22 @@
 //! startup, prints one diagnostics summary line derived from the returned reports,
 //! and reports the effective state of each foundational capability through the
 //! shell. It then builds the product core (the tab model), opens and attaches the
-//! first tab, and injects the core into the window, which presents the active
-//! tab's frame through the selected graphics backend.
+//! first tab, constructs the chrome text producer at the system locale, and
+//! injects both into the window, which presents the active tab's frame and the
+//! chrome labels through the selected graphics backend.
+//!
+//! The composition root owns the locale policy: it builds the producer from the
+//! baked catalogues detected against the operating-system preference, then hands
+//! the producer to the window. The window realizes and presents the chrome but
+//! owns no locale policy.
 
 use anyhow::Result;
 use panther_browser::{Availability, TabModel, bootstrap, m2_demonstration_fixture};
+use panther_chrome_text::ChromeText;
+use panther_localization::{
+    ActiveLocaleState, BakedResourceProvider, LocaleRequest, LocaleResolver, MessageCatalog,
+    ResourceProvider,
+};
 
 fn main() -> Result<()> {
     let result = bootstrap()?;
@@ -34,7 +45,11 @@ fn main() -> Result<()> {
     let tab = tab_model.open_tab();
     tab_model.attach(tab, m2_demonstration_fixture())?;
 
-    panther_window::run_window(tab_model)?;
+    let resolver = LocaleResolver::with_system_detection(BakedResourceProvider.available_locales());
+    let state = ActiveLocaleState::new(resolver, LocaleRequest::new());
+    let chrome_text = ChromeText::new(state, MessageCatalog::load())?;
+
+    panther_window::run_window(tab_model, chrome_text)?;
 
     Ok(())
 }

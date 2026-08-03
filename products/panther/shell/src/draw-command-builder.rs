@@ -2,13 +2,27 @@
 // @description Builds the ordered draw-command list that paints the shell chrome.
 // @created Diego Martín Lafuente <meerita@icloud.com>
 
-use purr_graphics::DrawCommand;
+use purr_graphics::{DrawCommand, Rect};
+use purr_text::{ONE_PX_RAW, PlacedGlyphRun, TextUnit};
 
+use crate::labels::LabelView;
 use crate::region_layout::RegionLayout;
 use crate::shell_region::{
     ACTIVE_TAB_COLOR, CLEAR_COLOR, CLOSE_COLOR, INACTIVE_TAB_COLOR, NEW_TAB_COLOR, ShellRegion,
 };
 use crate::tab_strip::{TabStripView, strip_layout};
+
+/// Inset from the address-field left edge for left-aligned label text.
+///
+/// It keeps the placeholder text off the field border. It is a surface-pixel
+/// length, matching the layout space the builder works in.
+const ADDRESS_TEXT_INSET: f32 = 8.0;
+
+/// Horizontal alignment of a label run inside its region.
+enum TextAlignment {
+    Left,
+    Centered,
+}
 
 /// Builds the ordered colored-rectangle list that paints the chrome.
 ///
@@ -18,15 +32,24 @@ use crate::tab_strip::{TabStripView, strip_layout};
 /// regions take the hover and focus color, so the interaction state is visible
 /// (D1, D3). The `Tab` band then holds the dynamic strip: one fill per slot (the
 /// active slot highlighted), one fill per close sub-rect, and the new-tab button,
-/// all painted over the band. The capacity is reserved from the fixed region
-/// count and the bounded strip element count, so the list never reallocates.
+/// all painted over the band. The label runs paint last, one `TexturedQuad` per
+/// glyph, so the chrome text draws over the region fills. The capacity is reserved
+/// from the fixed region count, the bounded strip element count, and the total
+/// placed glyph count, so the list never reallocates.
 pub fn build_commands(
     layout: &RegionLayout,
     hovered: Option<ShellRegion>,
     focused: Option<ShellRegion>,
     tabs: TabStripView,
+    labels: &LabelView,
 ) -> Vec<DrawCommand> {
-    let mut commands = Vec::with_capacity(ShellRegion::ALL.len() + 2 + 2 * tabs.tab_count());
+    let glyph_count: usize = labels
+        .runs()
+        .iter()
+        .map(|(_, run)| run.glyphs().len())
+        .sum();
+    let mut commands =
+        Vec::with_capacity(ShellRegion::ALL.len() + 2 + 2 * tabs.tab_count() + glyph_count);
 
     commands.push(DrawCommand::Clear { color: CLEAR_COLOR });
 
@@ -61,7 +84,99 @@ pub fn build_commands(
         color: NEW_TAB_COLOR,
     });
 
+    push_label_quads(layout, labels, &mut commands);
+
     commands
+}
+
+/// Paints each region label as one textured quad per placed glyph.
+///
+/// The address label is left-aligned inside its field; the navigation labels are
+/// centered in their controls. Every run is centered vertically on its region.
+/// A run with no placed glyph paints nothing.
+fn push_label_quads(layout: &RegionLayout, labels: &LabelView, commands: &mut Vec<DrawCommand>) {
+    for (region, run) in labels.runs() {
+        if run.glyphs().is_empty() {
+            continue;
+        }
+
+        let rect = layout.rect(*region);
+        let start_x = run_start_x(rect, run, alignment(*region));
+        let baseline = run_baseline(rect, run);
+        push_run(run, start_x, baseline, commands);
+    }
+}
+
+/// Emits the textured quads of one placed run along a baseline.
+///
+/// The pen starts at `start_x` and advances by each glyph paint advance. Each
+/// quad offsets from the pen and baseline by the glyph bearings and samples the
+/// run atlas at the glyph source rectangle, converted from physical texels to
+/// texel coordinates.
+fn push_run(run: &PlacedGlyphRun, start_x: f32, baseline: f32, commands: &mut Vec<DrawCommand>) {
+    let mut pen = start_x;
+    for glyph in run.glyphs() {
+        let source = glyph.source();
+        commands.push(DrawCommand::TexturedQuad {
+            rect: Rect::new(
+                pen + glyph.left() as f32,
+                baseline + glyph.top() as f32,
+                source.width as f32,
+                source.height as f32,
+            ),
+            texture: run.atlas(),
+            source: Rect::new(
+                source.x as f32,
+                source.y as f32,
+                source.width as f32,
+                source.height as f32,
+            ),
+        });
+        pen += to_px(glyph.advance());
+    }
+}
+
+/// The alignment of a label inside its region.
+///
+/// The address field reads left to right from its edge; every control label sits
+/// centered. The match is exhaustive, so a new region must choose an alignment.
+fn alignment(region: ShellRegion) -> TextAlignment {
+    match region {
+        ShellRegion::AddressField => TextAlignment::Left,
+        ShellRegion::NavigationBack
+        | ShellRegion::NavigationForward
+        | ShellRegion::NavigationReload
+        | ShellRegion::TopBar
+        | ShellRegion::Tab
+        | ShellRegion::Viewport => TextAlignment::Centered,
+    }
+}
+
+/// The pen start for a run given its region rectangle and alignment.
+///
+/// A left run insets from the region left edge. A centered run starts so its
+/// total advance is centered in the region width.
+fn run_start_x(rect: Rect, run: &PlacedGlyphRun, alignment: TextAlignment) -> f32 {
+    match alignment {
+        TextAlignment::Left => rect.x + ADDRESS_TEXT_INSET,
+        TextAlignment::Centered => rect.x + (rect.width - to_px(run.total_advance())) / 2.0,
+    }
+}
+
+/// The baseline that centers a run vertically on its region.
+///
+/// The text block spans the ascent above the baseline and the descent below it.
+/// Centering that block on the region places the baseline at the region top plus
+/// half the free vertical space plus the ascent.
+fn run_baseline(rect: Rect, run: &PlacedGlyphRun) -> f32 {
+    let ascent = to_px(run.ascent());
+    let descent = to_px(run.descent());
+    rect.y + (rect.height - (ascent + descent)) / 2.0 + ascent
+}
+
+/// Converts a fixed-point text length to a surface-pixel length.
+fn to_px(unit: TextUnit) -> f32 {
+    unit.raw() as f32 / ONE_PX_RAW as f32
 }
 
 #[cfg(test)]
@@ -72,7 +187,13 @@ mod tests {
 
     fn built(hovered: Option<ShellRegion>, focused: Option<ShellRegion>) -> Vec<DrawCommand> {
         let layout = layout(Extent2d::new(1280, 800));
-        build_commands(&layout, hovered, focused, TabStripView::default())
+        build_commands(
+            &layout,
+            hovered,
+            focused,
+            TabStripView::default(),
+            &LabelView::default(),
+        )
     }
 
     #[test]
@@ -99,7 +220,13 @@ mod tests {
     fn fill_order_follows_the_fixed_region_order() {
         let extent = Extent2d::new(1280, 800);
         let placed = layout(extent);
-        let commands = build_commands(&placed, None, None, TabStripView::default());
+        let commands = build_commands(
+            &placed,
+            None,
+            None,
+            TabStripView::default(),
+            &LabelView::default(),
+        );
 
         for (index, region) in ShellRegion::ALL.iter().enumerate() {
             assert_eq!(
@@ -117,7 +244,13 @@ mod tests {
     fn each_region_fill_rectangle_equals_the_region_rectangle() {
         let extent = Extent2d::new(1024, 768);
         let placed = layout(extent);
-        let commands = build_commands(&placed, None, None, TabStripView::default());
+        let commands = build_commands(
+            &placed,
+            None,
+            None,
+            TabStripView::default(),
+            &LabelView::default(),
+        );
 
         for (index, region) in ShellRegion::ALL.iter().enumerate() {
             let DrawCommand::FillRect { rect, .. } = commands[index + 1] else {
@@ -179,7 +312,13 @@ mod tests {
     #[test]
     fn strip_emits_one_slot_one_close_per_tab_and_one_new_tab_fill() {
         let placed = layout(Extent2d::new(1280, 800));
-        let commands = build_commands(&placed, None, None, TabStripView::new(3, Some(0)));
+        let commands = build_commands(
+            &placed,
+            None,
+            None,
+            TabStripView::new(3, Some(0)),
+            &LabelView::default(),
+        );
 
         let strip = fills_after_regions(&commands);
 
@@ -189,7 +328,13 @@ mod tests {
     #[test]
     fn active_slot_uses_the_active_color_and_an_inactive_slot_does_not() {
         let placed = layout(Extent2d::new(1280, 800));
-        let commands = build_commands(&placed, None, None, TabStripView::new(3, Some(1)));
+        let commands = build_commands(
+            &placed,
+            None,
+            None,
+            TabStripView::new(3, Some(1)),
+            &LabelView::default(),
+        );
 
         let strip = fills_after_regions(&commands);
 
@@ -200,5 +345,111 @@ mod tests {
         assert_eq!(color_of(&strip[1]), ACTIVE_TAB_COLOR);
         assert_eq!(color_of(&strip[0]), INACTIVE_TAB_COLOR);
         assert_ne!(ACTIVE_TAB_COLOR, INACTIVE_TAB_COLOR);
+    }
+
+    use purr_text::{
+        BundledFont, CmapOneToOneAdapter, GlyphKey, GlyphRunGeneration, GlyphRunId, ShapingRequest,
+        TextShapingAdapter, build_glyph_atlas,
+    };
+
+    fn label_size() -> TextUnit {
+        TextUnit::from_px(15).expect("in range")
+    }
+
+    fn placed_run(font: &BundledFont, text: &str, resource_id: u64) -> PlacedGlyphRun {
+        let size = label_size();
+        let run = CmapOneToOneAdapter
+            .shape(ShapingRequest {
+                font,
+                text,
+                size,
+                run_id: GlyphRunId::new(1),
+                generation: GlyphRunGeneration::new(1),
+            })
+            .expect("the label shapes");
+
+        let keys: Vec<GlyphKey> = run
+            .glyphs()
+            .iter()
+            .map(|glyph| GlyphKey::new(glyph.glyph(), size))
+            .collect();
+        let atlas = build_glyph_atlas(
+            font,
+            &keys,
+            purr_graphics::ProducerNamespace::new(3),
+            purr_graphics::ResourceId::new(resource_id),
+            purr_graphics::ResourceGeneration::new(1),
+            purr_graphics::DeviceGeneration::new(1),
+        )
+        .expect("the atlas builds");
+        let metrics = font.metrics(size).expect("metrics scale in range");
+
+        PlacedGlyphRun::from_shaped_run(&run, &atlas, metrics)
+    }
+
+    fn textured_quads(commands: &[DrawCommand]) -> Vec<DrawCommand> {
+        commands
+            .iter()
+            .filter(|command| matches!(command, DrawCommand::TexturedQuad { .. }))
+            .copied()
+            .collect()
+    }
+
+    fn first_quad_x(commands: &[DrawCommand]) -> f32 {
+        let quads = textured_quads(commands);
+        let DrawCommand::TexturedQuad { rect, .. } = quads[0] else {
+            panic!("the first label command is not a textured quad");
+        };
+        rect.x
+    }
+
+    #[test]
+    fn a_label_view_emits_one_textured_quad_per_glyph_sampling_the_run_atlas() {
+        let font = BundledFont::load().expect("the bundled font parses");
+        let run = placed_run(&font, "Ab", 1);
+        let placed = layout(Extent2d::new(1280, 800));
+        let view = LabelView::new(vec![(ShellRegion::AddressField, run.clone())]);
+
+        let commands = build_commands(&placed, None, None, TabStripView::default(), &view);
+
+        let quads = textured_quads(&commands);
+        assert_eq!(quads.len(), run.glyphs().len());
+        for quad in &quads {
+            let DrawCommand::TexturedQuad { texture, .. } = quad else {
+                unreachable!("filtered to textured quads");
+            };
+            assert_eq!(*texture, run.atlas());
+        }
+    }
+
+    #[test]
+    fn the_address_label_is_left_aligned_and_a_nav_label_is_centered() {
+        let font = BundledFont::load().expect("the bundled font parses");
+        let run = placed_run(&font, "Ab", 1);
+        let placed = layout(Extent2d::new(1280, 800));
+        let first_left = run.glyphs()[0].left() as f32;
+
+        let address = LabelView::new(vec![(ShellRegion::AddressField, run.clone())]);
+        let address_commands =
+            build_commands(&placed, None, None, TabStripView::default(), &address);
+        let address_rect = placed.rect(ShellRegion::AddressField);
+        let expected_address = address_rect.x + ADDRESS_TEXT_INSET + first_left;
+        assert!((first_quad_x(&address_commands) - expected_address).abs() < 0.01);
+
+        let nav = LabelView::new(vec![(ShellRegion::NavigationBack, run.clone())]);
+        let nav_commands = build_commands(&placed, None, None, TabStripView::default(), &nav);
+        let nav_rect = placed.rect(ShellRegion::NavigationBack);
+        let expected_nav =
+            nav_rect.x + (nav_rect.width - to_px(run.total_advance())) / 2.0 + first_left;
+        assert!((first_quad_x(&nav_commands) - expected_nav).abs() < 0.01);
+
+        assert_ne!(first_quad_x(&address_commands), first_quad_x(&nav_commands));
+    }
+
+    #[test]
+    fn an_empty_label_view_emits_no_textured_quad() {
+        let commands = built(None, None);
+
+        assert!(textured_quads(&commands).is_empty());
     }
 }

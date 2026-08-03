@@ -11,6 +11,20 @@ window-title = Panther
 # The action that opens a new browsing tab.
 window-new-tab = 新しいタブ
 
+## Toolbar.
+
+# The action that navigates to the previous page in history.
+toolbar-back = 戻る
+
+# The action that navigates to the next page in history.
+toolbar-forward = 進む
+
+# The action that reloads the current page.
+toolbar-reload = 再読み込み
+
+# The placeholder text in the empty address field.
+address-placeholder = 検索またはアドレスを入力
+
 ## Permission prompts.
 
 # Title of the camera permission prompt.

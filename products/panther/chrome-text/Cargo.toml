@@ -1,0 +1,21 @@
+# @file products/panther/chrome-text/Cargo.toml
+# @description Declares the Panther chrome text producer crate.
+# @created Diego Martín Lafuente <meerita@icloud.com>
+
+[package]
+name = "panther-chrome-text"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+locale.workspace = true
+panther-localization.workspace = true
+panther-shell.workspace = true
+purr-graphics.workspace = true
+purr-text.workspace = true
+thiserror.workspace = true

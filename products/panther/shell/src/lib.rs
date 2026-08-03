@@ -26,6 +26,8 @@
 mod capability_report;
 #[path = "draw-command-builder.rs"]
 mod draw_command_builder;
+#[path = "labels.rs"]
+mod labels;
 #[path = "pointer-hit-test.rs"]
 mod pointer_hit_test;
 #[path = "region-layout.rs"]
@@ -39,6 +41,7 @@ mod tab_strip;
 
 pub use capability_report::report_startup_capabilities;
 pub use draw_command_builder::build_commands;
+pub use labels::LabelView;
 pub use pointer_hit_test::{PointerPosition, hit_test};
 pub use region_layout::{RegionLayout, layout};
 pub use shell::{KeyInput, Shell};

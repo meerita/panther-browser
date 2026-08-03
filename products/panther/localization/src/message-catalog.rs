@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use fluent::FluentValue;
 use i18n_embed::LanguageLoader;
-use i18n_embed::fluent::FluentLanguageLoader;
+use i18n_embed::fluent::{FluentLanguageLoader, NegotiationStrategy};
 use i18n_embed_fl::fl;
 use locale::Locale;
 use unic_langid::LanguageIdentifier;
@@ -40,11 +40,13 @@ const REFERENCE: &str = "en";
 /// The catalogue parses each locale once into the Fluent loader and shares the
 /// result behind an [`Arc`], so cloning the catalogue never reparses. Argument
 /// isolation stays enabled to prepare bidi isolation of interpolated values.
-/// The reference locale `en` is the source and the ultimate fallback.
+/// The reference locale `en` is the source and the ultimate fallback. The
+/// `locale` field is the effective locale the catalog resolves in, and every
+/// resolved message is stamped with it so its writing direction is correct.
 #[derive(Clone)]
 pub struct MessageCatalog {
     loader: Arc<FluentLanguageLoader>,
-    reference: Locale,
+    locale: Locale,
     generation: LocaleGeneration,
 }
 
@@ -55,13 +57,12 @@ impl MessageCatalog {
     /// valid Fluent is dropped, the loader tolerates malformed content, and the
     /// reference locale always remains, so construction never crashes.
     pub fn load() -> Self {
-        let reference = reference_locale();
         let languages = validated_available_languages();
         let loader = new_loader(&languages);
 
         Self {
             loader: Arc::new(loader),
-            reference,
+            locale: reference_locale(),
             generation: LocaleGeneration::FIRST,
         }
     }
@@ -84,7 +85,7 @@ impl MessageCatalog {
 
         Self {
             loader: Arc::new(loader),
-            reference: pseudolocale.locale(),
+            locale: pseudolocale.locale(),
             generation: LocaleGeneration::FIRST,
         }
     }
@@ -98,8 +99,32 @@ impl MessageCatalog {
     pub fn at_generation(&self, generation: LocaleGeneration) -> Self {
         Self {
             loader: Arc::clone(&self.loader),
-            reference: self.reference.clone(),
+            locale: self.locale.clone(),
             generation,
+        }
+    }
+
+    /// Returns a catalog that resolves in the requested UI locales.
+    ///
+    /// The requested locales are negotiated against the loaded catalogues with
+    /// the reference `en` as the ultimate fallback, so an unavailable locale
+    /// resolves through `en` rather than failing. The negotiated loader shares
+    /// the already-parsed bundles, so this does not reparse. The effective
+    /// locale is stamped onto every resolved message, so its writing direction
+    /// is correct, and the current generation is preserved.
+    pub fn for_locales(&self, locales: &[Locale]) -> Self {
+        let requested: Vec<LanguageIdentifier> =
+            locales.iter().map(locale::to_language_identifier).collect();
+        let loader = self
+            .loader
+            .select_languages_negotiate(&requested, NegotiationStrategy::Filtering);
+        let effective = locale::from_language_identifier(&loader.current_language())
+            .unwrap_or_else(|_| self.locale.clone());
+
+        Self {
+            loader: Arc::new(loader),
+            locale: effective,
+            generation: self.generation,
         }
     }
 
@@ -166,13 +191,9 @@ impl MessageCatalog {
 
     fn bounded(&self, id: &str, text: String) -> LocalizedMessage {
         if text.len() > MAX_MESSAGE_BYTES {
-            return LocalizedMessage::resolved(
-                id.to_owned(),
-                self.reference.clone(),
-                self.generation,
-            );
+            return LocalizedMessage::resolved(id.to_owned(), self.locale.clone(), self.generation);
         }
-        LocalizedMessage::resolved(text, self.reference.clone(), self.generation)
+        LocalizedMessage::resolved(text, self.locale.clone(), self.generation)
     }
 }
 
@@ -323,6 +344,47 @@ mod tests {
 
         let advanced = catalog.at_generation(LocaleGeneration::new(5));
         assert_eq!(advanced.window_title().generation().value(), 5);
+    }
+
+    #[test]
+    fn requested_locale_resolves_its_translation() {
+        use locale::Locale;
+
+        let spanish = Locale::parse("es").expect("valid identifier");
+        let catalog = MessageCatalog::load().for_locales(&[spanish]);
+        let message = catalog.message("address-placeholder");
+
+        assert_eq!(message.text(), "Buscar o escribir dirección");
+        assert_eq!(message.locale().to_string(), "es");
+    }
+
+    #[test]
+    fn unavailable_locale_falls_back_to_the_reference() {
+        use locale::Locale;
+
+        let unshipped = Locale::parse("de").expect("valid identifier");
+        let catalog = MessageCatalog::load().for_locales(&[unshipped]);
+        let message = catalog.message("address-placeholder");
+
+        assert_eq!(message.text(), "Search or enter address");
+        assert_eq!(message.locale().to_string(), "en");
+    }
+
+    #[test]
+    fn requested_locale_preserves_the_active_generation() {
+        use locale::Locale;
+
+        use crate::locale_generation::LocaleGeneration;
+
+        let spanish = Locale::parse("es").expect("valid identifier");
+        let catalog = MessageCatalog::load()
+            .at_generation(LocaleGeneration::new(7))
+            .for_locales(&[spanish]);
+
+        assert_eq!(
+            catalog.message("address-placeholder").generation().value(),
+            7
+        );
     }
 
     #[test]

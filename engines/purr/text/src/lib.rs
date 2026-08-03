@@ -27,6 +27,9 @@ mod text_shaping;
 #[path = "glyph-atlas.rs"]
 mod glyph_atlas;
 
+#[path = "placed-run.rs"]
+mod placed_run;
+
 pub use pixel_unit::{FRACTION_BITS, ONE_PX_RAW, TextUnit};
 
 pub use bundled_font::{
@@ -44,3 +47,5 @@ pub use text_shaping::{
 pub use glyph_atlas::{
     GlyphAtlas, GlyphAtlasError, GlyphKey, GlyphPlacement, TexelRect, build_glyph_atlas,
 };
+
+pub use placed_run::{PlacedGlyph, PlacedGlyphRun};

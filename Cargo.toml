@@ -7,6 +7,7 @@ resolver = "3"
 members = [
     "apps/panther",
     "products/panther/browser",
+    "products/panther/chrome-text",
     "products/panther/localization",
     "products/panther/shell",
     "products/panther/window",
@@ -43,6 +44,7 @@ icu_locale = "2.2"
 icu_locale_core = "2.2"
 locale = { path = "foundation/locale" }
 memory = { path = "foundation/memory" }
+panther-chrome-text = { path = "products/panther/chrome-text" }
 panther-localization = { path = "products/panther/localization" }
 panther-shell = { path = "products/panther/shell" }
 pollster = "0.4"

@@ -15,6 +15,7 @@ workspace = true
 [dependencies]
 capability-system.workspace = true
 purr-graphics.workspace = true
+purr-text.workspace = true
 
 [dev-dependencies]
 purr-graphics-software = { path = "../../../engines/purr/graphics-software" }

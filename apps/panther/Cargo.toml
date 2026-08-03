@@ -15,5 +15,7 @@ workspace = true
 [dependencies]
 anyhow.workspace = true
 panther-browser = { path = "../../products/panther/browser" }
+panther-chrome-text.workspace = true
+panther-localization.workspace = true
 panther-shell.workspace = true
 panther-window = { path = "../../products/panther/window" }
