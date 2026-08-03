@@ -15,4 +15,17 @@
 #[path = "pixel-unit.rs"]
 mod pixel_unit;
 
+#[path = "bundled-font.rs"]
+mod bundled_font;
+
+#[path = "glyph-raster.rs"]
+mod glyph_raster;
+
 pub use pixel_unit::{FRACTION_BITS, ONE_PX_RAW, TextUnit};
+
+pub use bundled_font::{
+    BundledFont, FontError, FontHandle, FontMetrics, FontVisibility, GlyphIndex, GlyphOutline,
+    OutlinePoint,
+};
+
+pub use glyph_raster::{GlyphMask, MAX_GLYPH_EXTENT, RasterError, rasterize_glyph};

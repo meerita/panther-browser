@@ -54,6 +54,11 @@ impl TextUnit {
         self.0
     }
 
+    /// The sum, or `None` at the `i32` boundary. Never wraps.
+    pub fn checked_add(self, other: Self) -> Option<Self> {
+        self.0.checked_add(other.0).map(Self)
+    }
+
     /// The sum, clamped to the `i32` boundary. Never wraps.
     pub fn saturating_add(self, other: Self) -> Self {
         Self(self.0.saturating_add(other.0))

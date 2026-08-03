@@ -15,3 +15,4 @@ workspace = true
 [dependencies]
 memory.workspace = true
 purr-graphics.workspace = true
+thiserror.workspace = true
