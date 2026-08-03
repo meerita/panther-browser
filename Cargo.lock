@@ -2035,6 +2035,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "panther-chrome-text"
+version = "0.1.0"
+dependencies = [
+ "locale",
+ "panther-localization",
+ "panther-shell",
+]
+
+[[package]]
 name = "panther-localization"
 version = "0.1.0"
 dependencies = [
