@@ -5,6 +5,7 @@
 use purr_graphics::{DrawCommand, Extent2d};
 
 use crate::draw_command_builder::build_commands;
+use crate::labels::LabelView;
 use crate::pointer_hit_test::{PointerPosition, hit_test};
 use crate::region_layout::{RegionLayout, layout};
 use crate::shell_region::ShellRegion;
@@ -42,6 +43,7 @@ pub struct Shell {
     extent: Extent2d,
     layout: RegionLayout,
     tabs: TabStripView,
+    labels: LabelView,
     hovered: Option<ShellRegion>,
     focused: Option<ShellRegion>,
     dirty: bool,
@@ -54,6 +56,7 @@ impl Shell {
             extent,
             layout: layout(extent),
             tabs: TabStripView::default(),
+            labels: LabelView::default(),
             hovered: None,
             focused: None,
             dirty: true,
@@ -75,6 +78,20 @@ impl Shell {
     pub fn set_tabs(&mut self, view: TabStripView) {
         if view != self.tabs {
             self.tabs = view;
+            self.dirty = true;
+        }
+    }
+
+    /// Replaces the neutral label view the window pushed.
+    ///
+    /// The window rebuilds the view from the chrome text producer and hands it in
+    /// on every locale or label change. The shell marks itself dirty only when the
+    /// view actually changes, so an unchanged push drives no repaint (D9). The view
+    /// carries only placed glyph geometry and atlas identities, so the shell stays
+    /// prose-free.
+    pub fn set_labels(&mut self, view: LabelView) {
+        if view != self.labels {
+            self.labels = view;
             self.dirty = true;
         }
     }
@@ -156,11 +173,17 @@ impl Shell {
 
     /// Ordered draw-command list that paints the current chrome state.
     ///
-    /// The list reflects the current layout, hover, and focus, so the window
-    /// paints exactly the state the shell holds (D5). The command set is `Clear`
-    /// and `FillRect` only (D1).
+    /// The list reflects the current layout, hover, focus, and labels, so the
+    /// window paints exactly the state the shell holds (D5). It clears, fills each
+    /// region and the tab strip, then paints the label runs as textured quads.
     pub fn build_commands(&self) -> Vec<DrawCommand> {
-        build_commands(&self.layout, self.hovered, self.focused, self.tabs)
+        build_commands(
+            &self.layout,
+            self.hovered,
+            self.focused,
+            self.tabs,
+            &self.labels,
+        )
     }
 }
 
@@ -282,6 +305,53 @@ mod tests {
 
         shell.clear_dirty();
         shell.set_tabs(TabStripView::new(2, Some(0)));
+        assert!(!shell.is_dirty());
+    }
+
+    #[test]
+    fn set_labels_marks_dirty_on_a_changed_view_only() {
+        use purr_text::{
+            BundledFont, CmapOneToOneAdapter, GlyphKey, GlyphRunGeneration, GlyphRunId,
+            PlacedGlyphRun, ShapingRequest, TextShapingAdapter, TextUnit, build_glyph_atlas,
+        };
+
+        let font = BundledFont::load().expect("the bundled font parses");
+        let size = TextUnit::from_px(15).expect("in range");
+        let run = CmapOneToOneAdapter
+            .shape(ShapingRequest {
+                font: &font,
+                text: "Ab",
+                size,
+                run_id: GlyphRunId::new(1),
+                generation: GlyphRunGeneration::new(1),
+            })
+            .expect("the label shapes");
+        let keys: Vec<GlyphKey> = run
+            .glyphs()
+            .iter()
+            .map(|glyph| GlyphKey::new(glyph.glyph(), size))
+            .collect();
+        let atlas = build_glyph_atlas(
+            &font,
+            &keys,
+            purr_graphics::ProducerNamespace::new(3),
+            purr_graphics::ResourceId::new(1),
+            purr_graphics::ResourceGeneration::new(1),
+            purr_graphics::DeviceGeneration::new(1),
+        )
+        .expect("the atlas builds");
+        let metrics = font.metrics(size).expect("metrics scale in range");
+        let placed = PlacedGlyphRun::from_shaped_run(&run, &atlas, metrics);
+        let view = LabelView::new(vec![(ShellRegion::AddressField, placed)]);
+
+        let mut shell = shell();
+        shell.clear_dirty();
+
+        shell.set_labels(view.clone());
+        assert!(shell.is_dirty());
+
+        shell.clear_dirty();
+        shell.set_labels(view);
         assert!(!shell.is_dirty());
     }
 

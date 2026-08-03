@@ -2073,6 +2073,7 @@ dependencies = [
  "capability-system",
  "purr-graphics",
  "purr-graphics-software",
+ "purr-text",
  "raw-window-handle",
 ]
 
