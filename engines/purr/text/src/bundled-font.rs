@@ -1,4 +1,4 @@
-// @file engines/purr/engine/src/bundled-font.rs
+// @file engines/purr/text/src/bundled-font.rs
 // @description Loads the bundled font, parses the M2 tables with hardened fail-closed parsing, and exposes a capability handle.
 // @created Diego Martín Lafuente <meerita@icloud.com>
 
@@ -24,7 +24,7 @@
 // unit tests below, so a few accessors are otherwise unused in a non-test build.
 #![allow(dead_code)]
 
-use crate::layout_unit::LayoutUnit;
+use crate::pixel_unit::TextUnit;
 use memory::{AccountingRegistry, ByteCount, Region};
 
 /// Upper bound for the number of tables in the font directory.
@@ -169,27 +169,27 @@ impl GlyphOutline {
     }
 }
 
-/// Font metrics for one pixel size, in fixed-point `LayoutUnit`.
+/// Font metrics for one pixel size, in fixed-point `TextUnit`.
 ///
 /// Ascent and descent are positive distances from the baseline (up and down). The
 /// line height is the derived default: ascent plus descent plus the font line gap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FontMetrics {
-    ascent: LayoutUnit,
-    descent: LayoutUnit,
-    line_height: LayoutUnit,
+    ascent: TextUnit,
+    descent: TextUnit,
+    line_height: TextUnit,
 }
 
 impl FontMetrics {
-    pub fn ascent(self) -> LayoutUnit {
+    pub fn ascent(self) -> TextUnit {
         self.ascent
     }
 
-    pub fn descent(self) -> LayoutUnit {
+    pub fn descent(self) -> TextUnit {
         self.descent
     }
 
-    pub fn line_height(self) -> LayoutUnit {
+    pub fn line_height(self) -> TextUnit {
         self.line_height
     }
 }
@@ -272,7 +272,7 @@ impl BundledFont {
 
     /// The horizontal advance of a glyph at a pixel size, or `None` when the glyph
     /// index is out of range or the scaled value overflows.
-    pub fn advance(&self, glyph: GlyphIndex, size: LayoutUnit) -> Option<LayoutUnit> {
+    pub fn advance(&self, glyph: GlyphIndex, size: TextUnit) -> Option<TextUnit> {
         let index = glyph.value();
         if index >= self.glyph_count {
             return None;
@@ -313,7 +313,7 @@ impl BundledFont {
     /// The font metrics at a pixel size, or `None` when a scaled value overflows.
     ///
     /// The derived line height is ascent plus descent plus the font line gap.
-    pub fn metrics(&self, size: LayoutUnit) -> Option<FontMetrics> {
+    pub fn metrics(&self, size: TextUnit) -> Option<FontMetrics> {
         let ascent = scale_font_units(i32::from(self.ascent_font_units), size, self.units_per_em)?;
         let descent_up = i32::from(self.descent_font_units).abs();
         let descent = scale_font_units(descent_up, size, self.units_per_em)?;
@@ -331,11 +331,11 @@ impl BundledFont {
 /// Scales a font-unit length to a fixed-point pixel length.
 ///
 /// The pixel length is `units * size / units_per_em`. The math stays integer-only
-/// through `LayoutUnit`, so the result is deterministic. Returns `None` when the
+/// through `TextUnit`, so the result is deterministic. Returns `None` when the
 /// value does not fit the fixed-point range.
-fn scale_font_units(units: i32, size: LayoutUnit, units_per_em: u16) -> Option<LayoutUnit> {
+fn scale_font_units(units: i32, size: TextUnit, units_per_em: u16) -> Option<TextUnit> {
     let numerator = i64::from(units) * i64::from(size.raw());
-    LayoutUnit::from_raw_ratio(numerator, i64::from(units_per_em))
+    TextUnit::from_raw_ratio(numerator, i64::from(units_per_em))
 }
 
 /// A parsed Unicode `cmap` format-4 subtable.
@@ -927,7 +927,7 @@ mod tests {
     #[test]
     fn advances_scale_from_font_units_to_layout_units() {
         let font = BundledFont::load().expect("the bundled font parses");
-        let size = LayoutUnit::from_px(16).expect("in range");
+        let size = TextUnit::from_px(16).expect("in range");
         let advance = font
             .advance(font.glyph_for('A'), size)
             .expect("the glyph has an advance");
@@ -938,7 +938,7 @@ mod tests {
     #[test]
     fn font_metrics_are_positive_layout_units() {
         let font = BundledFont::load().expect("the bundled font parses");
-        let size = LayoutUnit::from_px(16).expect("in range");
+        let size = TextUnit::from_px(16).expect("in range");
         let metrics = font.metrics(size).expect("metrics scale in range");
 
         assert!(metrics.ascent().raw() > 0);
@@ -981,7 +981,7 @@ mod tests {
     #[test]
     fn an_out_of_range_glyph_has_no_advance() {
         let font = BundledFont::load().expect("the bundled font parses");
-        let size = LayoutUnit::from_px(16).expect("in range");
+        let size = TextUnit::from_px(16).expect("in range");
         assert_eq!(font.advance(GlyphIndex::new(u16::MAX), size), None);
     }
 

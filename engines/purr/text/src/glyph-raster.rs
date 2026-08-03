@@ -1,4 +1,4 @@
-// @file engines/purr/engine/src/glyph-raster.rs
+// @file engines/purr/text/src/glyph-raster.rs
 // @description Rasterizes a glyph outline into a deterministic grayscale coverage mask in pure safe Rust.
 // @created Diego Martín Lafuente <meerita@icloud.com>
 
@@ -27,7 +27,7 @@
 #![allow(dead_code)]
 
 use crate::bundled_font::{BundledFont, FontError, GlyphIndex, GlyphOutline};
-use crate::layout_unit::LayoutUnit;
+use crate::pixel_unit::TextUnit;
 
 /// Number of vertical sub-rows sampled per pixel row.
 ///
@@ -134,7 +134,7 @@ impl GlyphMask {
 pub fn rasterize_glyph(
     font: &BundledFont,
     glyph: GlyphIndex,
-    size: LayoutUnit,
+    size: TextUnit,
 ) -> Result<GlyphMask, RasterError> {
     if size.raw() <= 0 {
         return Err(RasterError::InvalidSize);
@@ -151,11 +151,11 @@ pub fn rasterize_glyph(
 
 /// The font-unit-to-pixel scale factor for a pixel size.
 ///
-/// The pixel size is the fixed-point `LayoutUnit` read as a pixel count; the scale
+/// The pixel size is the fixed-point `TextUnit` read as a pixel count; the scale
 /// converts a font design unit to a device pixel. It is `f32`, but the whole path
 /// is a pure function of its inputs, so the output stays deterministic.
-fn pixel_scale(size: LayoutUnit, units_per_em: u16) -> f32 {
-    let size_px = size.raw() as f32 / crate::layout_unit::ONE_PX_RAW as f32;
+fn pixel_scale(size: TextUnit, units_per_em: u16) -> f32 {
+    let size_px = size.raw() as f32 / crate::pixel_unit::ONE_PX_RAW as f32;
     size_px / units_per_em as f32
 }
 
@@ -458,8 +458,8 @@ mod tests {
         BundledFont::load().expect("the bundled font parses")
     }
 
-    fn size() -> LayoutUnit {
-        LayoutUnit::from_px(16).expect("in range")
+    fn size() -> TextUnit {
+        TextUnit::from_px(16).expect("in range")
     }
 
     #[test]
@@ -498,7 +498,7 @@ mod tests {
     fn a_zero_size_fails_closed() {
         let font = font();
         assert_eq!(
-            rasterize_glyph(&font, font.glyph_for('A'), LayoutUnit::ZERO),
+            rasterize_glyph(&font, font.glyph_for('A'), TextUnit::ZERO),
             Err(RasterError::InvalidSize)
         );
     }
@@ -506,7 +506,7 @@ mod tests {
     #[test]
     fn an_extreme_size_fails_closed_without_panic() {
         let font = font();
-        let huge = LayoutUnit::from_px(4_000).expect("in range");
+        let huge = TextUnit::from_px(4_000).expect("in range");
         assert_eq!(
             rasterize_glyph(&font, font.glyph_for('A'), huge),
             Err(RasterError::GlyphTooLarge)

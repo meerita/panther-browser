@@ -28,7 +28,7 @@
 use crate::computed_style::StyleGeneration;
 use crate::dom_node::NodeId;
 use crate::layout_unit::{LayoutUnit, LogicalPoint, LogicalRect};
-use crate::text_shaping::GlyphRunSlice;
+use purr_text::GlyphRunSlice;
 
 /// Marks one atomic layout commit.
 ///

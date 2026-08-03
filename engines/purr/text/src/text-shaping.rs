@@ -1,4 +1,4 @@
-// @file engines/purr/engine/src/text-shaping.rs
+// @file engines/purr/text/src/text-shaping.rs
 // @description Defines the text shaping seam: the TextShapingAdapter trait, a 1:1 cmap adapter, and the immutable GlyphRun.
 // @created Diego Martín Lafuente <meerita@icloud.com>
 
@@ -25,7 +25,7 @@
 #![allow(dead_code)]
 
 use crate::bundled_font::{BundledFont, FontHandle, GlyphIndex};
-use crate::layout_unit::LayoutUnit;
+use crate::pixel_unit::TextUnit;
 
 /// Upper bound for the number of scalars one shaping call accepts.
 ///
@@ -69,7 +69,7 @@ impl GlyphRunGeneration {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PositionedGlyph {
     glyph: GlyphIndex,
-    advance: LayoutUnit,
+    advance: TextUnit,
 }
 
 impl PositionedGlyph {
@@ -77,7 +77,7 @@ impl PositionedGlyph {
         self.glyph
     }
 
-    pub fn advance(self) -> LayoutUnit {
+    pub fn advance(self) -> TextUnit {
         self.advance
     }
 }
@@ -102,7 +102,7 @@ pub struct GlyphRun {
     id: GlyphRunId,
     generation: GlyphRunGeneration,
     font: FontHandle,
-    size: LayoutUnit,
+    size: TextUnit,
     glyphs: Vec<PositionedGlyph>,
     cluster_map: Vec<usize>,
 }
@@ -128,7 +128,7 @@ impl GlyphRun {
     /// The size is a shaping input, not a texture coordinate: it records the font
     /// size the advances were measured with, so a later stage can rasterize the
     /// glyphs at the matching size. It is not an atlas position.
-    pub fn size(&self) -> LayoutUnit {
+    pub fn size(&self) -> TextUnit {
         self.size
     }
 
@@ -159,8 +159,8 @@ impl GlyphRun {
     }
 
     /// The total advance of the run, clamped to the fixed-point range.
-    pub fn total_advance(&self) -> LayoutUnit {
-        self.glyphs.iter().fold(LayoutUnit::ZERO, |sum, glyph| {
+    pub fn total_advance(&self) -> TextUnit {
+        self.glyphs.iter().fold(TextUnit::ZERO, |sum, glyph| {
             sum.saturating_add(glyph.advance)
         })
     }
@@ -199,7 +199,7 @@ pub struct GlyphRunSlice {
     run_id: GlyphRunId,
     generation: GlyphRunGeneration,
     font: FontHandle,
-    size: LayoutUnit,
+    size: TextUnit,
     glyphs: Vec<PositionedGlyph>,
     cluster_map: Vec<usize>,
 }
@@ -224,7 +224,7 @@ impl GlyphRunSlice {
     ///
     /// Paint rasterizes each glyph at this size; it is a shaping input, never a
     /// texture coordinate.
-    pub fn size(&self) -> LayoutUnit {
+    pub fn size(&self) -> TextUnit {
         self.size
     }
 
@@ -250,8 +250,8 @@ impl GlyphRunSlice {
     }
 
     /// The total advance of the slice, clamped to the fixed-point range.
-    pub fn total_advance(&self) -> LayoutUnit {
-        self.glyphs.iter().fold(LayoutUnit::ZERO, |sum, glyph| {
+    pub fn total_advance(&self) -> TextUnit {
+        self.glyphs.iter().fold(TextUnit::ZERO, |sum, glyph| {
             sum.saturating_add(glyph.advance)
         })
     }
@@ -261,7 +261,7 @@ impl GlyphRunSlice {
 pub struct ShapingRequest<'a> {
     pub font: &'a BundledFont,
     pub text: &'a str,
-    pub size: LayoutUnit,
+    pub size: TextUnit,
     pub run_id: GlyphRunId,
     pub generation: GlyphRunGeneration,
 }
@@ -321,7 +321,7 @@ mod tests {
             .shape(ShapingRequest {
                 font: &font,
                 text,
-                size: LayoutUnit::from_px(16).expect("in range"),
+                size: TextUnit::from_px(16).expect("in range"),
                 run_id: GlyphRunId::new(1),
                 generation: GlyphRunGeneration::new(1),
             })
@@ -346,7 +346,7 @@ mod tests {
 
         // The run records the size it was shaped at, so a later stage rasterizes
         // the glyphs at the matching size.
-        assert_eq!(run.size(), LayoutUnit::from_px(16).expect("in range"));
+        assert_eq!(run.size(), TextUnit::from_px(16).expect("in range"));
     }
 
     #[test]
@@ -365,7 +365,7 @@ mod tests {
     fn empty_text_yields_an_empty_run() {
         let run = shape("");
         assert!(run.is_empty());
-        assert_eq!(run.total_advance(), LayoutUnit::ZERO);
+        assert_eq!(run.total_advance(), TextUnit::ZERO);
     }
 
     #[test]

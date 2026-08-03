@@ -29,18 +29,20 @@
 
 use std::collections::HashMap;
 
-use crate::bundled_font::BundledFont;
 use crate::computed_style::StyleTree;
 use crate::css_parser::PropertyId;
+use crate::document_store::engine_producer_namespace;
 use crate::dom_node::NodeId;
 use crate::fragment_tree::{BoxContents, BoxFragment, FragmentTree, LineFragment, LineItem};
-use crate::glyph_atlas::{
-    GlyphAtlas, GlyphAtlasError, GlyphKey, GlyphPlacement, build_glyph_atlas,
-};
 use crate::layout_unit::{LayoutUnit, LogicalRect, ONE_PX_RAW};
-use crate::text_shaping::GlyphRunSlice;
+use crate::text_unit_conversion::{to_layout_unit, to_text_unit};
 use purr_graphics::{
-    Color, DeviceGeneration, DrawCommand, Extent2d, Rect, ResourceGeneration, ResourceUpload,
+    Color, DeviceGeneration, DrawCommand, Extent2d, Rect, ResourceGeneration, ResourceId,
+    ResourceUpload,
+};
+use purr_text::{
+    BundledFont, GlyphAtlas, GlyphAtlasError, GlyphKey, GlyphPlacement, GlyphRunSlice,
+    build_glyph_atlas,
 };
 
 /// The opaque white document background painted behind all content.
@@ -84,7 +86,14 @@ pub fn paint_document(
     if let Some(root) = tree.root() {
         collect_glyph_keys(root, device_pixel_ratio, &mut keys);
     }
-    let atlas = build_glyph_atlas(font, &keys, resource_generation, device_generation)?;
+    let atlas = build_glyph_atlas(
+        font,
+        &keys,
+        engine_producer_namespace(),
+        ResourceId::new(1),
+        resource_generation,
+        device_generation,
+    )?;
     let lookup: HashMap<GlyphKey, GlyphPlacement> = atlas
         .placements()
         .iter()
@@ -135,7 +144,7 @@ fn collect_glyph_keys(box_fragment: &BoxFragment, dpr: f32, keys: &mut Vec<Glyph
 
 /// Collects the glyph keys of one text-fragment slice.
 fn collect_slice_keys(slice: &GlyphRunSlice, dpr: f32, keys: &mut Vec<GlyphKey>) {
-    let size = device_size(slice.size(), dpr);
+    let size = to_text_unit(device_size(to_layout_unit(slice.size()), dpr));
     for glyph in slice.glyphs() {
         keys.push(GlyphKey::new(glyph.glyph(), size));
     }
@@ -223,7 +232,7 @@ fn paint_text(
     dpr: f32,
     commands: &mut Vec<DrawCommand>,
 ) {
-    let size = device_size(slice.size(), dpr);
+    let size = to_text_unit(device_size(to_layout_unit(slice.size()), dpr));
     let baseline_px = to_device_px(baseline, dpr);
     let mut pen = inline_start;
 
@@ -245,7 +254,7 @@ fn paint_text(
                 });
             }
         }
-        pen = pen.saturating_add(glyph.advance());
+        pen = pen.saturating_add(to_layout_unit(glyph.advance()));
     }
 }
 

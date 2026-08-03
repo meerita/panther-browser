@@ -34,7 +34,6 @@
 // so some entry points are otherwise unused in a non-test build.
 #![allow(dead_code)]
 
-use crate::bundled_font::BundledFont;
 use crate::computed_style::{ComputedStyle, StyleTree};
 use crate::css_parser::PropertyId;
 use crate::dom_node::{Dom, NodeId};
@@ -44,7 +43,7 @@ use crate::fragment_tree::{
 use crate::inline_layout::{LayoutCounters, layout_inline};
 use crate::layout_tree::{LayoutBox, LayoutError, MAX_LAYOUT_DEPTH, build_layout_tree};
 use crate::layout_unit::{LayoutSize, LayoutUnit, LogicalPoint, LogicalRect, LogicalSize};
-use crate::text_shaping::{CmapOneToOneAdapter, TextShapingAdapter};
+use purr_text::{BundledFont, CmapOneToOneAdapter, TextShapingAdapter};
 
 /// Upper bound for the number of fragments in one fragment tree.
 ///

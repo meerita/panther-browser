@@ -1,9 +1,9 @@
-# @file engines/purr/engine/Cargo.toml
-# @description Declares the Purr web engine core package.
+# @file engines/purr/text/Cargo.toml
+# @description Declares the neutral Purr text primitive package.
 # @created Diego Martín Lafuente <meerita@icloud.com>
 
 [package]
-name = "purr-engine"
+name = "purr-text"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,8 +13,6 @@ publish = false
 workspace = true
 
 [dependencies]
-capability-system.workspace = true
 memory.workspace = true
 purr-graphics.workspace = true
-purr-text.workspace = true
 thiserror.workspace = true

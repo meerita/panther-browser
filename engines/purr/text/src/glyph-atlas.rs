@@ -1,13 +1,13 @@
-// @file engines/purr/engine/src/glyph-atlas.rs
+// @file engines/purr/text/src/glyph-atlas.rs
 // @description Packs rasterized glyph masks into one bounded glyph atlas and its ResourceUpload.
 // @created Diego Martín Lafuente <meerita@icloud.com>
 
 //! Glyph atlas.
 //!
-//! The atlas packs the grayscale masks of the glyphs one document generation needs
-//! into a single texture and produces a `purr-graphics` [`ResourceUpload`] with
-//! [`ResourceKind::GlyphAtlas`] in the engine producer namespace. A later paint
-//! stage samples this atlas with `TexturedQuad` commands.
+//! The atlas packs the grayscale masks of the glyphs one generation needs into a
+//! single texture and produces a `purr-graphics` [`ResourceUpload`] with
+//! [`ResourceKind::GlyphAtlas`] in the caller-supplied producer namespace. A later
+//! paint stage samples this atlas with `TexturedQuad` commands.
 //!
 //! The atlas maps each glyph key (a glyph index at a pixel size) to a physical
 //! source rectangle in the texture. These source rectangles are physical data that
@@ -19,8 +19,8 @@
 //! [`MAX_TEXTURE_EXTENT`], the pixel-buffer length is computed with checked
 //! arithmetic and matches the descriptor exactly, and the glyph count is capped, so
 //! a request that would exceed a bound fails closed with a typed error and never
-//! panics. The atlas is rebuilt per document generation; retention and eviction are
-//! a later concern.
+//! panics. The atlas is rebuilt per generation; retention and eviction are a later
+//! concern.
 
 // Paint (a later phase) is the first non-test consumer of the atlas and its
 // accessors. This phase builds the atlas and exercises it through the unit tests
@@ -30,13 +30,12 @@
 use std::collections::HashSet;
 
 use crate::bundled_font::{BundledFont, GlyphIndex};
-use crate::document_store::engine_producer_namespace;
 use crate::glyph_raster::{GlyphMask, RasterError, rasterize_glyph};
-use crate::layout_unit::LayoutUnit;
+use crate::pixel_unit::TextUnit;
 use purr_graphics::{
     AlphaMode, ColorSpace, DeviceGeneration, Extent2d, GpuResourceIdentity, MAX_TEXTURE_EXTENT,
-    ResourceGeneration, ResourceId, ResourceKind, ResourceUpload, TextureDescriptor,
-    TextureFormatClass,
+    ProducerNamespace, ResourceGeneration, ResourceId, ResourceKind, ResourceUpload,
+    TextureDescriptor, TextureFormatClass,
 };
 
 /// Transparent border, in texels, kept around every packed glyph.
@@ -57,13 +56,6 @@ const MAX_ATLAS_GLYPHS: usize = 8_192;
 /// Bytes one atlas texel occupies. The atlas format is four-channel 8-bit.
 const BYTES_PER_TEXEL: usize = 4;
 
-/// Fixed resource identifier of the single engine glyph atlas.
-///
-/// The engine owns one glyph atlas per document generation, so its numeric
-/// identifier is fixed; the resource generation distinguishes one rebuild from the
-/// next.
-const ATLAS_RESOURCE_ID: u64 = 1;
-
 /// A glyph rendered at a pixel size: the key the atlas packs and looks up by.
 ///
 /// The size is part of the key because the same glyph index at two sizes is two
@@ -71,11 +63,11 @@ const ATLAS_RESOURCE_ID: u64 = 1;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GlyphKey {
     glyph: GlyphIndex,
-    size: LayoutUnit,
+    size: TextUnit,
 }
 
 impl GlyphKey {
-    pub fn new(glyph: GlyphIndex, size: LayoutUnit) -> Self {
+    pub fn new(glyph: GlyphIndex, size: TextUnit) -> Self {
         Self { glyph, size }
     }
 
@@ -83,7 +75,7 @@ impl GlyphKey {
         self.glyph
     }
 
-    pub fn size(self) -> LayoutUnit {
+    pub fn size(self) -> TextUnit {
         self.size
     }
 }
@@ -145,8 +137,8 @@ pub enum GlyphAtlasError {
 
 /// One packed glyph atlas: a resource upload and the glyph placements in it.
 ///
-/// The upload carries the engine-namespace [`ResourceKind::GlyphAtlas`] identity,
-/// a bounded [`TextureDescriptor`], and tightly packed pixels whose length matches
+/// The upload carries the caller-supplied [`ResourceKind::GlyphAtlas`] identity, a
+/// bounded [`TextureDescriptor`], and tightly packed pixels whose length matches
 /// the descriptor. The placements map each glyph key to its physical source
 /// rectangle in the texture.
 #[derive(Debug, Clone, PartialEq)]
@@ -185,16 +177,19 @@ impl GlyphAtlas {
     }
 }
 
-/// Builds one glyph atlas from the glyph keys a document generation needs.
+/// Builds one glyph atlas from the glyph keys a generation needs.
 ///
 /// Duplicate keys are packed once. The build rasterizes each distinct glyph,
-/// shelf-packs the masks into one texture, and produces the upload in the engine
-/// namespace with the given resource and device generations. It fails closed with a
-/// typed error, and never panics, when the glyph count, the atlas extent, or the
-/// pixel-buffer length would exceed its bound.
+/// shelf-packs the masks into one texture, and produces the upload in the
+/// caller-supplied producer namespace with the given resource id and the resource
+/// and device generations. It fails closed with a typed error, and never panics,
+/// when the glyph count, the atlas extent, or the pixel-buffer length would exceed
+/// its bound.
 pub fn build_glyph_atlas(
     font: &BundledFont,
     keys: &[GlyphKey],
+    producer_namespace: ProducerNamespace,
+    resource_id: ResourceId,
     resource_generation: ResourceGeneration,
     device_generation: DeviceGeneration,
 ) -> Result<GlyphAtlas, GlyphAtlasError> {
@@ -227,8 +222,8 @@ pub fn build_glyph_atlas(
         .map_err(|_| GlyphAtlasError::AtlasTooLarge)?;
 
     let resource = GpuResourceIdentity::new(
-        engine_producer_namespace(),
-        ResourceId::new(ATLAS_RESOURCE_ID),
+        producer_namespace,
+        resource_id,
         resource_generation,
         ResourceKind::GlyphAtlas,
         device_generation,
@@ -403,12 +398,20 @@ mod tests {
         SceneIdentity, SurfaceGeneration, SurfaceId,
     };
 
+    fn test_namespace() -> ProducerNamespace {
+        ProducerNamespace::new(7)
+    }
+
+    fn test_resource_id() -> ResourceId {
+        ResourceId::new(42)
+    }
+
     fn font() -> BundledFont {
         BundledFont::load().expect("the bundled font parses")
     }
 
-    fn size() -> LayoutUnit {
-        LayoutUnit::from_px(16).expect("in range")
+    fn size() -> TextUnit {
+        TextUnit::from_px(16).expect("in range")
     }
 
     fn key(font: &BundledFont, character: char) -> GlyphKey {
@@ -419,6 +422,8 @@ mod tests {
         build_glyph_atlas(
             font,
             keys,
+            test_namespace(),
+            test_resource_id(),
             ResourceGeneration::new(1),
             DeviceGeneration::new(1),
         )
@@ -426,13 +431,14 @@ mod tests {
     }
 
     #[test]
-    fn the_upload_uses_the_glyph_atlas_kind_in_the_engine_namespace() {
+    fn the_atlas_identity_uses_exactly_the_caller_supplied_namespace_and_resource_id() {
         let font = font();
         let atlas = build(&font, &[key(&font, 'A'), key(&font, 'b')]);
         let resource = atlas.resource();
 
         assert_eq!(resource.resource_kind(), ResourceKind::GlyphAtlas);
-        assert_eq!(resource.producer_namespace(), engine_producer_namespace());
+        assert_eq!(resource.producer_namespace(), test_namespace());
+        assert_eq!(resource.resource_id(), test_resource_id());
     }
 
     #[test]
