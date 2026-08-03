@@ -33,7 +33,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use panther_browser::TabModel;
-use panther_shell::{KeyInput, PointerPosition, Shell, ShellRegion};
+use panther_shell::{KeyInput, PointerPosition, Shell, ShellAction, ShellRegion, TabStripView};
 use purr_embedding::{DocumentFrame, ViewportGeometry};
 use purr_graphics::{
     AlphaMode, DrawCommand, Extent2d, FrameSubmission, FrameToken, GpuResourceIdentity,
@@ -68,6 +68,13 @@ const INITIAL_HEIGHT: f64 = 768.0;
 /// the window appears. Beyond this window the failure is no longer transient.
 const PRESENT_RECOVERY_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Upper bound on open tabs, enforced before a new tab is created.
+///
+/// The window is the sole tab creator and a pointer press is the only path to
+/// `open_tab`, so bounding tab creation here keeps the resource bounded at its
+/// creation point (security: bounded resources, D8).
+const MAX_TABS: usize = 8;
+
 /// Result of one redraw attempt.
 enum FrameOutcome {
     /// The frame was submitted and presented.
@@ -98,10 +105,15 @@ pub fn run_window(tab_model: TabModel) -> Result<(), WindowError> {
 ///
 /// It presents the injected product core. It holds the [`TabModel`] and the last
 /// frame produced for the active tab. The frame is produced synchronously on
-/// initialize and on resize only (D6); the compositor offsets and clips it into
-/// the viewport on each redraw. The frame is absent until the first successful
-/// produce, which never happens for a degenerate (zero-area) viewport or an empty
-/// active tab.
+/// initialize, on resize, and on a tab action only (D6, D9); the compositor
+/// offsets and clips it into the viewport on each redraw. The frame is absent
+/// until the first successful produce, which never happens for a degenerate
+/// (zero-area) viewport or an empty active tab.
+///
+/// The window pushes a neutral tab-strip view to the shell whenever the tab state
+/// changes, and it is the sole translator from a neutral [`ShellAction`] to a
+/// [`TabModel`] operation. It maps a slot index to a `TabId` and enforces the
+/// `MAX_TABS` bound; the shell never names a tab identity (D3).
 struct Presentation {
     window: Rc<Window>,
     backend: ActiveBackend,
@@ -268,17 +280,35 @@ impl Presentation {
         self.request_redraw_if_dirty();
     }
 
-    /// Forwards a pointer press at the last known position and redraws on change.
+    /// Forwards a pointer press and applies any returned tab action.
     ///
     /// A press with no prior cursor position has no location to hit-test, so it is
-    /// ignored.
-    fn pointer_pressed(&mut self) {
+    /// ignored. A strip press returns a neutral [`ShellAction`] the window applies
+    /// to the model; every other press only updates focus. A redraw is requested
+    /// only when the shell changed since the last paint (D5).
+    fn pointer_pressed(&mut self) -> Result<(), WindowError> {
         let Some(position) = self.last_cursor else {
-            return;
+            return Ok(());
         };
 
-        self.shell.pointer_pressed(position);
+        if let Some(action) = self.shell.pointer_pressed(position) {
+            self.apply_tab_action(action)?;
+        }
         self.request_redraw_if_dirty();
+        Ok(())
+    }
+
+    /// Applies a tab action to the model, refreshes the strip, and re-produces.
+    ///
+    /// The neutral action carries a slot index; the window maps it to the tab at
+    /// that index and calls the matching model operation, enforcing `MAX_TABS`
+    /// before a new tab (D8). It then rebuilds the neutral view from the model and
+    /// pushes it to the shell, and re-produces the active frame, since the active
+    /// tab or its content may have changed (D9).
+    fn apply_tab_action(&mut self, action: ShellAction) -> Result<(), WindowError> {
+        apply_tab_action(&mut self.tab_model, action)?;
+        self.shell.set_tabs(tab_strip_view(&self.tab_model));
+        self.produce_document()
     }
 
     /// Forwards a key to the focused region. It is a no-op at M1 and never
@@ -388,6 +418,9 @@ impl WindowApplication {
             document_frame: None,
             textures: Vec::new(),
         };
+        presentation
+            .shell
+            .set_tabs(tab_strip_view(&presentation.tab_model));
         presentation.produce_document()?;
 
         self.presentation = Some(presentation);
@@ -446,7 +479,10 @@ impl ApplicationHandler for WindowApplication {
                 state: ElementState::Pressed,
                 ..
             } => {
-                presentation.pointer_pressed();
+                if let Err(error) = presentation.pointer_pressed() {
+                    self.error = Some(error);
+                    event_loop.exit();
+                }
             }
             WindowEvent::KeyboardInput { event: key, .. } if key.state == ElementState::Pressed => {
                 presentation.key_pressed(to_key_input(key.physical_key));
@@ -469,6 +505,50 @@ impl ApplicationHandler for WindowApplication {
             _ => {}
         }
     }
+}
+
+/// Builds the neutral tab-strip view from the model.
+///
+/// The tab count is the model tab count and the active slot is the position of
+/// the active tab in insertion order, so the shell works in slot indices only and
+/// never names a `TabId` (D3).
+fn tab_strip_view(model: &TabModel) -> TabStripView {
+    let active = model
+        .active_tab()
+        .and_then(|id| model.tabs().iter().position(|tab| tab.id() == id));
+    TabStripView::new(model.tabs().len(), active)
+}
+
+/// Applies one neutral tab action to the model.
+///
+/// The window is the sole index-to-`TabId` mapper (D3) and the sole enforcer of
+/// the `MAX_TABS` bound (D8): a `NewTab` at the bound is ignored, and an
+/// `ActivateTab` or `CloseTab` for a slot index that names no tab is a no-op. A
+/// slot index resolves to a tab through insertion order, so it never confuses one
+/// tab with another. The model owns its errors; a rejected activate is mapped to
+/// a content error.
+fn apply_tab_action(model: &mut TabModel, action: ShellAction) -> Result<(), WindowError> {
+    match action {
+        ShellAction::ActivateTab(index) => {
+            let Some(id) = model.tabs().get(index).map(|tab| tab.id()) else {
+                return Ok(());
+            };
+            model.activate(id).map_err(WindowError::Content)?;
+        }
+        ShellAction::NewTab => {
+            if model.tabs().len() < MAX_TABS {
+                model.open_tab();
+            }
+        }
+        ShellAction::CloseTab(index) => {
+            let Some(id) = model.tabs().get(index).map(|tab| tab.id()) else {
+                return Ok(());
+            };
+            model.close_tab(id);
+        }
+    }
+
+    Ok(())
 }
 
 /// Repoints every glyph quad from the engine resource identity to the backend one.
@@ -589,4 +669,105 @@ fn ensure_handles(window: &Window) -> Result<(), WindowError> {
         .display_handle()
         .map_err(|_| WindowError::WindowHandleUnavailable)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn active_id(model: &TabModel) -> Option<u64> {
+        model
+            .active_tab()
+            .and_then(|id| model.tabs().iter().position(|tab| tab.id() == id))
+            .map(|index| index as u64)
+    }
+
+    #[test]
+    fn tab_strip_view_reports_the_count_and_the_active_slot_index() {
+        let mut model = TabModel::new();
+        model.open_tab();
+        let second = model.open_tab();
+        model.open_tab();
+        model.activate(second).expect("activate succeeds");
+
+        let view = tab_strip_view(&model);
+
+        assert_eq!(view.tab_count(), 3);
+        assert_eq!(view.active(), Some(1));
+    }
+
+    #[test]
+    fn tab_strip_view_of_an_empty_model_has_no_tabs_and_no_active_slot() {
+        let model = TabModel::new();
+
+        let view = tab_strip_view(&model);
+
+        assert_eq!(view.tab_count(), 0);
+        assert_eq!(view.active(), None);
+    }
+
+    #[test]
+    fn activate_action_activates_the_tab_at_the_slot_index() {
+        let mut model = TabModel::new();
+        let first = model.open_tab();
+        model.open_tab();
+        model.open_tab();
+
+        apply_tab_action(&mut model, ShellAction::ActivateTab(0)).expect("activate applies");
+
+        assert_eq!(model.active_tab(), Some(first));
+    }
+
+    #[test]
+    fn activate_action_for_an_unknown_slot_is_a_no_op() {
+        let mut model = TabModel::new();
+        let only = model.open_tab();
+
+        apply_tab_action(&mut model, ShellAction::ActivateTab(5)).expect("out-of-range is a no-op");
+
+        assert_eq!(model.active_tab(), Some(only));
+        assert_eq!(model.tabs().len(), 1);
+    }
+
+    #[test]
+    fn new_tab_action_opens_a_tab_up_to_the_bound() {
+        let mut model = TabModel::new();
+
+        for _ in 0..MAX_TABS {
+            apply_tab_action(&mut model, ShellAction::NewTab).expect("new tab applies");
+        }
+        assert_eq!(model.tabs().len(), MAX_TABS);
+
+        apply_tab_action(&mut model, ShellAction::NewTab).expect("new tab at the bound applies");
+        assert_eq!(model.tabs().len(), MAX_TABS);
+    }
+
+    #[test]
+    fn close_action_closes_and_reactivates_next_then_previous_then_none() {
+        let mut model = TabModel::new();
+        let first = model.open_tab();
+        let second = model.open_tab();
+        let third = model.open_tab();
+        model.activate(second).expect("activate succeeds");
+
+        apply_tab_action(&mut model, ShellAction::CloseTab(1)).expect("close applies");
+        assert_eq!(model.active_tab(), Some(third));
+
+        apply_tab_action(&mut model, ShellAction::CloseTab(1)).expect("close applies");
+        assert_eq!(model.active_tab(), Some(first));
+
+        apply_tab_action(&mut model, ShellAction::CloseTab(0)).expect("close applies");
+        assert_eq!(model.active_tab(), None);
+    }
+
+    #[test]
+    fn close_action_for_an_unknown_slot_is_a_no_op() {
+        let mut model = TabModel::new();
+        model.open_tab();
+
+        apply_tab_action(&mut model, ShellAction::CloseTab(9)).expect("out-of-range is a no-op");
+
+        assert_eq!(model.tabs().len(), 1);
+        assert_eq!(active_id(&model), Some(0));
+    }
 }
