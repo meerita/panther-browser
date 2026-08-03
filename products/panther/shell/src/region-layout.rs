@@ -15,9 +15,6 @@ const TAB_STRIP_HEIGHT_FRACTION: f32 = 0.05;
 /// Fraction of the window width taken by each navigation control.
 const CONTROL_WIDTH_FRACTION: f32 = 0.06;
 
-/// Fraction of the window width taken by the single tab representation.
-const TAB_WIDTH_FRACTION: f32 = 0.18;
-
 /// Number of navigation controls placed side by side in the top bar.
 const NAVIGATION_CONTROL_COUNT: f32 = 3.0;
 
@@ -62,9 +59,10 @@ impl RegionLayout {
 /// Places every region for one window extent.
 ///
 /// The top bar spans the width. The three navigation controls sit at the left of
-/// the top bar, and the address field fills the rest of it. The tab strip sits
-/// directly below the top bar and holds one tab. The viewport fills the area
-/// under the tab strip. The work is constant over the fixed region set.
+/// the top bar, and the address field fills the rest of it. The tab strip band
+/// spans the full width directly below the top bar and holds the dynamic tab
+/// strip. The viewport fills the area under the tab strip. The work is constant
+/// over the fixed region set.
 pub fn layout(extent: Extent2d) -> RegionLayout {
     let width = extent.width as f32;
     let height = extent.height as f32;
@@ -83,12 +81,7 @@ pub fn layout(extent: Extent2d) -> RegionLayout {
     let address_width = (width - address_x).max(0.0);
     let address_field = Rect::new(address_x, 0.0, address_width, top_bar_height);
 
-    let tab = Rect::new(
-        0.0,
-        top_bar_height,
-        width * TAB_WIDTH_FRACTION,
-        tab_strip_height,
-    );
+    let tab = Rect::new(0.0, top_bar_height, width, tab_strip_height);
 
     let viewport_y = top_bar_height + tab_strip_height;
     let viewport_height = (height - viewport_y).max(0.0);
