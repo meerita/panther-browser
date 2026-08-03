@@ -7,9 +7,10 @@
 //! Each variant translates a lower-layer failure into the vocabulary of the
 //! windowing layer. The `winit` sources are preserved for diagnostics. The
 //! backend source is the Panther-owned interface error, never a raw backend or
-//! native-API type.
+//! native-API type. The content source is the product-core error, never a raw
+//! engine or seam type.
 
-use purr_embedding::SeamError;
+use panther_browser::CoreError;
 use purr_graphics::GraphicsError;
 use winit::error::{EventLoopError, OsError};
 
@@ -26,6 +27,6 @@ pub enum WindowError {
     InvalidSurfaceExtent,
     #[error("the graphics backend failed")]
     Backend(#[source] GraphicsError),
-    #[error("the document engine failed")]
-    Document(#[source] SeamError),
+    #[error("the product core failed")]
+    Content(#[source] CoreError),
 }
