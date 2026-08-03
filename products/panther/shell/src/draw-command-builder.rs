@@ -5,7 +5,10 @@
 use purr_graphics::DrawCommand;
 
 use crate::region_layout::RegionLayout;
-use crate::shell_region::{CLEAR_COLOR, ShellRegion};
+use crate::shell_region::{
+    ACTIVE_TAB_COLOR, CLEAR_COLOR, CLOSE_COLOR, INACTIVE_TAB_COLOR, NEW_TAB_COLOR, ShellRegion,
+};
+use crate::tab_strip::{TabStripView, strip_layout};
 
 /// Builds the ordered colored-rectangle list that paints the chrome.
 ///
@@ -13,14 +16,17 @@ use crate::shell_region::{CLEAR_COLOR, ShellRegion};
 /// region in `ShellRegion::ALL` order (top bar first, viewport last), so a
 /// control paints over the top bar band it sits in. The hovered and focused
 /// regions take the hover and focus color, so the interaction state is visible
-/// (D1, D3). The capacity is reserved from the fixed region count plus the clear,
-/// so the list never reallocates.
+/// (D1, D3). The `Tab` band then holds the dynamic strip: one fill per slot (the
+/// active slot highlighted), one fill per close sub-rect, and the new-tab button,
+/// all painted over the band. The capacity is reserved from the fixed region
+/// count and the bounded strip element count, so the list never reallocates.
 pub fn build_commands(
     layout: &RegionLayout,
     hovered: Option<ShellRegion>,
     focused: Option<ShellRegion>,
+    tabs: TabStripView,
 ) -> Vec<DrawCommand> {
-    let mut commands = Vec::with_capacity(ShellRegion::ALL.len() + 1);
+    let mut commands = Vec::with_capacity(ShellRegion::ALL.len() + 2 + 2 * tabs.tab_count());
 
     commands.push(DrawCommand::Clear { color: CLEAR_COLOR });
 
@@ -31,6 +37,29 @@ pub fn build_commands(
             color,
         });
     }
+
+    let strip = strip_layout(layout.rect(ShellRegion::Tab), tabs.tab_count());
+
+    for (index, slot) in strip.slots.iter().enumerate() {
+        let color = if tabs.active() == Some(index) {
+            ACTIVE_TAB_COLOR
+        } else {
+            INACTIVE_TAB_COLOR
+        };
+        commands.push(DrawCommand::FillRect { rect: *slot, color });
+    }
+
+    for close in &strip.closes {
+        commands.push(DrawCommand::FillRect {
+            rect: *close,
+            color: CLOSE_COLOR,
+        });
+    }
+
+    commands.push(DrawCommand::FillRect {
+        rect: strip.new_tab,
+        color: NEW_TAB_COLOR,
+    });
 
     commands
 }
@@ -43,7 +72,7 @@ mod tests {
 
     fn built(hovered: Option<ShellRegion>, focused: Option<ShellRegion>) -> Vec<DrawCommand> {
         let layout = layout(Extent2d::new(1280, 800));
-        build_commands(&layout, hovered, focused)
+        build_commands(&layout, hovered, focused, TabStripView::default())
     }
 
     #[test]
@@ -54,7 +83,7 @@ mod tests {
     }
 
     #[test]
-    fn one_fill_rect_per_region_plus_the_clear() {
+    fn empty_view_fills_every_region_and_the_new_tab_button() {
         let commands = built(None, None);
 
         let fills = commands
@@ -62,15 +91,15 @@ mod tests {
             .filter(|command| matches!(command, DrawCommand::FillRect { .. }))
             .count();
 
-        assert_eq!(fills, ShellRegion::ALL.len());
-        assert_eq!(commands.len(), ShellRegion::ALL.len() + 1);
+        assert_eq!(fills, ShellRegion::ALL.len() + 1);
+        assert_eq!(commands.len(), ShellRegion::ALL.len() + 2);
     }
 
     #[test]
     fn fill_order_follows_the_fixed_region_order() {
         let extent = Extent2d::new(1280, 800);
         let placed = layout(extent);
-        let commands = build_commands(&placed, None, None);
+        let commands = build_commands(&placed, None, None, TabStripView::default());
 
         for (index, region) in ShellRegion::ALL.iter().enumerate() {
             assert_eq!(
@@ -85,10 +114,10 @@ mod tests {
     }
 
     #[test]
-    fn each_fill_rectangle_equals_the_region_rectangle() {
+    fn each_region_fill_rectangle_equals_the_region_rectangle() {
         let extent = Extent2d::new(1024, 768);
         let placed = layout(extent);
-        let commands = build_commands(&placed, None, None);
+        let commands = build_commands(&placed, None, None, TabStripView::default());
 
         for (index, region) in ShellRegion::ALL.iter().enumerate() {
             let DrawCommand::FillRect { rect, .. } = commands[index + 1] else {
@@ -141,5 +170,35 @@ mod tests {
         };
         assert_eq!(color, region.display_color(true, true));
         assert_eq!(color, region.display_color(false, true));
+    }
+
+    fn fills_after_regions(commands: &[DrawCommand]) -> &[DrawCommand] {
+        &commands[ShellRegion::ALL.len() + 1..]
+    }
+
+    #[test]
+    fn strip_emits_one_slot_one_close_per_tab_and_one_new_tab_fill() {
+        let placed = layout(Extent2d::new(1280, 800));
+        let commands = build_commands(&placed, None, None, TabStripView::new(3, Some(0)));
+
+        let strip = fills_after_regions(&commands);
+
+        assert_eq!(strip.len(), 3 + 3 + 1);
+    }
+
+    #[test]
+    fn active_slot_uses_the_active_color_and_an_inactive_slot_does_not() {
+        let placed = layout(Extent2d::new(1280, 800));
+        let commands = build_commands(&placed, None, None, TabStripView::new(3, Some(1)));
+
+        let strip = fills_after_regions(&commands);
+
+        let color_of = |command: &DrawCommand| match command {
+            DrawCommand::FillRect { color, .. } => *color,
+            _ => panic!("strip element is not a fill"),
+        };
+        assert_eq!(color_of(&strip[1]), ACTIVE_TAB_COLOR);
+        assert_eq!(color_of(&strip[0]), INACTIVE_TAB_COLOR);
+        assert_ne!(ACTIVE_TAB_COLOR, INACTIVE_TAB_COLOR);
     }
 }

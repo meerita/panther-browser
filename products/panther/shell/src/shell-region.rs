@@ -46,6 +46,21 @@ const HOVER_COLOR: Color = Color::new(0.50, 0.52, 0.56, 1.0);
 /// base color and the hover color, so the focus state reads clearly.
 const FOCUS_COLOR: Color = Color::new(0.20, 0.45, 0.85, 1.0);
 
+/// Fill for the active tab slot in the strip.
+///
+/// The active slot is lighter than the inactive slot, so the active tab reads
+/// clearly against the band. It is a placeholder (D1).
+pub(crate) const ACTIVE_TAB_COLOR: Color = Color::new(0.42, 0.44, 0.48, 1.0);
+
+/// Fill for an inactive tab slot in the strip.
+pub(crate) const INACTIVE_TAB_COLOR: Color = Color::new(0.24, 0.26, 0.30, 1.0);
+
+/// Fill for the per-slot close sub-rect.
+pub(crate) const CLOSE_COLOR: Color = Color::new(0.72, 0.34, 0.34, 1.0);
+
+/// Fill for the new-tab button at the band right.
+pub(crate) const NEW_TAB_COLOR: Color = Color::new(0.30, 0.52, 0.40, 1.0);
+
 impl ShellRegion {
     /// Every region in fixed order, top bar first and viewport last.
     ///

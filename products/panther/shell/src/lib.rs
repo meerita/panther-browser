@@ -14,9 +14,13 @@
 //! At M1 the chrome is colored rectangles with no text (D1). The pointer
 //! hit-test resolves a pointer position to a region, the interaction router
 //! turns pointer and key input into hover and focus state, and the draw builder
-//! turns that state into an ordered `Clear` and `FillRect` command list. Startup
-//! reports the effective state of the foundational capabilities as canonical
-//! diagnostics (D6), since M1 has no in-window text primitive to show them.
+//! turns that state into an ordered `Clear` and `FillRect` command list. The
+//! `Tab` region is the strip band that holds a dynamic tab strip: the shell
+//! renders one slot per tab from a neutral view the window pushes, and reports a
+//! neutral tab action from a strip press, so it never names a tab identity (D3).
+//! Startup reports the effective state of the foundational capabilities as
+//! canonical diagnostics (D6), since M1 has no in-window text primitive to show
+//! them.
 
 #[path = "capability-report.rs"]
 mod capability_report;
@@ -30,6 +34,8 @@ mod region_layout;
 mod shell;
 #[path = "shell-region.rs"]
 mod shell_region;
+#[path = "tab-strip.rs"]
+mod tab_strip;
 
 pub use capability_report::report_startup_capabilities;
 pub use draw_command_builder::build_commands;
@@ -37,3 +43,4 @@ pub use pointer_hit_test::{PointerPosition, hit_test};
 pub use region_layout::{RegionLayout, layout};
 pub use shell::{KeyInput, Shell};
 pub use shell_region::{CLEAR_COLOR, ShellRegion};
+pub use tab_strip::{ShellAction, TabStripView};

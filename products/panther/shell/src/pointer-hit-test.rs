@@ -50,7 +50,7 @@ pub fn hit_test(layout: &RegionLayout, position: PointerPosition) -> Option<Shel
 ///
 /// The half-open rule stops two adjacent regions from both claiming a shared
 /// edge pixel, so every position resolves to at most one region.
-fn contains(rect: Rect, position: PointerPosition) -> bool {
+pub(crate) fn contains(rect: Rect, position: PointerPosition) -> bool {
     position.x >= rect.x
         && position.x < rect.x + rect.width
         && position.y >= rect.y
