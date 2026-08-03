@@ -14,6 +14,7 @@ workspace = true
 
 [dependencies]
 panther-browser = { path = "../browser" }
+panther-chrome-text.workspace = true
 panther-shell.workspace = true
 purr-embedding = { path = "../../../engines/purr/embedding" }
 purr-graphics.workspace = true
@@ -22,3 +23,7 @@ purr-graphics-software = { path = "../../../engines/purr/graphics-software" }
 winit.workspace = true
 raw-window-handle.workspace = true
 thiserror.workspace = true
+
+[dev-dependencies]
+locale.workspace = true
+panther-localization.workspace = true

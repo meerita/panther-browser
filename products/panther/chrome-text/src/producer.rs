@@ -78,6 +78,20 @@ pub enum ChromeTextError {
     Metrics,
 }
 
+/// Whether a [`ChromeText::refresh`] rebuilt the chrome or kept the built result.
+///
+/// The window uses this to decide whether to re-push the view to the shell and
+/// re-realize the atlas, so it never clones the view or reallocates a texture
+/// while the labels are unchanged. It names no locale type, so the window reads
+/// the outcome without depending on the localization crate.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChromeRefresh {
+    /// The active generation matched, so the built chrome was kept.
+    Unchanged,
+    /// The resolved labels changed, so a fresh atlas and view were built.
+    Rebuilt,
+}
+
 /// The neutral chrome text the shell paints: one placed glyph run per region.
 ///
 /// The view owns its runs and compares by value, so the shell tracks a change to
@@ -163,21 +177,23 @@ impl ChromeText {
     /// the atlas identity stays stable and the window need not re-realize;
     /// otherwise it advances the resource generation and builds a fresh atlas with
     /// a new identity. It fails closed with a typed error when the rebuild fails.
-    pub fn refresh(&mut self) -> Result<(), ChromeTextError> {
+    /// It reports [`ChromeRefresh::Rebuilt`] only when a fresh atlas was built, so
+    /// the caller re-realizes and re-pushes the view only on a real change.
+    pub fn refresh(&mut self) -> Result<ChromeRefresh, ChromeTextError> {
         let generation = self.state.generation();
         if self.build.generation == generation {
-            return Ok(());
+            return Ok(ChromeRefresh::Unchanged);
         }
 
         let labels = resolve_labels(&self.state, &self.catalog);
         if *labels.entries() == self.build.labels {
             self.build.generation = generation;
-            return Ok(());
+            return Ok(ChromeRefresh::Unchanged);
         }
 
         self.resource_generation += 1;
         self.build = build_atlas(&self.font, &labels, self.resource_generation)?;
-        Ok(())
+        Ok(ChromeRefresh::Rebuilt)
     }
 
     /// Changes the active user-interface language and advances the locale
@@ -275,7 +291,7 @@ mod tests {
     use panther_localization::{ActiveLocaleState, LocaleRequest, LocaleResolver, MessageCatalog};
     use panther_shell::ShellRegion;
 
-    use super::{CHROME_NAMESPACE, ChromeText};
+    use super::{CHROME_NAMESPACE, ChromeRefresh, ChromeText};
 
     /// The engine document atlas namespace the chrome atlas must never collide
     /// with (`engine_producer_namespace()` is `ProducerNamespace::new(2)`).
@@ -349,10 +365,11 @@ mod tests {
         let identity = producer.identity();
         let view = producer.view().clone();
 
-        producer.refresh().expect("refresh with no change succeeds");
+        let outcome = producer.refresh().expect("refresh with no change succeeds");
 
         // The identity and the view are byte-for-byte unchanged, so no atlas was
         // rasterized again.
+        assert_eq!(outcome, ChromeRefresh::Unchanged);
         assert_eq!(producer.identity(), identity);
         assert_eq!(producer.view(), &view);
         assert_eq!(
@@ -368,10 +385,11 @@ mod tests {
         let english = producer.view().clone();
 
         producer.change_language(locale("es"));
-        producer.refresh().expect("the rebuild succeeds");
+        let outcome = producer.refresh().expect("the rebuild succeeds");
 
         // A new locale changes the labels, so the atlas is rebuilt: the resource
         // generation advances and the identity changes.
+        assert_eq!(outcome, ChromeRefresh::Rebuilt);
         let after = producer.identity();
         assert_ne!(after, before);
         assert!(after.resource_generation().value() > before.resource_generation().value());

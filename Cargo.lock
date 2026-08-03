@@ -2019,6 +2019,8 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "panther-browser",
+ "panther-chrome-text",
+ "panther-localization",
  "panther-shell",
  "panther-window",
 ]
@@ -2081,7 +2083,10 @@ dependencies = [
 name = "panther-window"
 version = "0.1.0"
 dependencies = [
+ "locale",
  "panther-browser",
+ "panther-chrome-text",
+ "panther-localization",
  "panther-shell",
  "purr-embedding",
  "purr-graphics",

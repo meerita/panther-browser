@@ -33,13 +33,16 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use panther_browser::TabModel;
-use panther_shell::{KeyInput, PointerPosition, Shell, ShellAction, ShellRegion, TabStripView};
+use panther_chrome_text::{ChromeRefresh, ChromeText, ChromeTextView};
+use panther_shell::{
+    KeyInput, LabelView, PointerPosition, Shell, ShellAction, ShellRegion, TabStripView,
+};
 use purr_embedding::{DocumentFrame, ViewportGeometry};
 use purr_graphics::{
     AlphaMode, DrawCommand, Extent2d, FrameSubmission, FrameToken, GpuResourceIdentity,
-    GraphicsError, MAX_TEXTURE_EXTENT, PresentationTargetDescriptor, Rect, SceneGeneration,
-    SceneId, SceneIdentity, SurfaceIdentity, TextureDescriptor, TextureFormatClass,
-    WindowDisplayHandle, WindowSurface,
+    GraphicsError, MAX_TEXTURE_EXTENT, PresentationTargetDescriptor, Rect, ResourceUpload,
+    SceneGeneration, SceneId, SceneIdentity, SurfaceIdentity, TextureDescriptor,
+    TextureFormatClass, WindowDisplayHandle, WindowSurface,
 };
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::application::ApplicationHandler;
@@ -84,13 +87,27 @@ enum FrameOutcome {
     Recovered,
 }
 
+/// The shell chrome ready to submit: its draw commands and the realized chrome
+/// atlas upload.
+///
+/// The commands are the shell chrome list with the chrome text quads already
+/// remapped to the backend atlas identity. The upload carries the chrome atlas
+/// pixels under that same identity, so the merge names only a live backend
+/// resource.
+struct RealizedChrome {
+    commands: Vec<DrawCommand>,
+    uploads: Vec<ResourceUpload>,
+}
+
 /// Opens a window and drives the shell chrome through the selected backend.
 ///
-/// The call blocks until the window closes. It returns the first initialization
-/// or presentation failure, or `Ok(())` on a clean exit.
-pub fn run_window(tab_model: TabModel) -> Result<(), WindowError> {
+/// The composition root injects both the product core and the chrome text
+/// producer: the window presents the core and realizes the producer's atlas, but
+/// it owns no locale policy. The call blocks until the window closes. It returns
+/// the first initialization or presentation failure, or `Ok(())` on a clean exit.
+pub fn run_window(tab_model: TabModel, chrome_text: ChromeText) -> Result<(), WindowError> {
     let event_loop = EventLoop::new().map_err(WindowError::EventLoop)?;
-    let mut application = WindowApplication::new(tab_model);
+    let mut application = WindowApplication::new(tab_model, chrome_text);
     event_loop
         .run_app(&mut application)
         .map_err(WindowError::EventLoop)?;
@@ -114,6 +131,13 @@ pub fn run_window(tab_model: TabModel) -> Result<(), WindowError> {
 /// changes, and it is the sole translator from a neutral [`ShellAction`] to a
 /// [`TabModel`] operation. It maps a slot index to a `TabId` and enforces the
 /// `MAX_TABS` bound; the shell never names a tab identity (D3).
+///
+/// The window also holds the injected chrome text producer. It pushes the
+/// producer's placed-run view to the shell and realizes the chrome atlas into a
+/// backend texture, but it owns no locale policy: the producer encapsulates the
+/// catalog and the active locale, so the window never names the localization
+/// crate. The chrome atlas realizes through the same identity-keyed texture cache
+/// as the document atlas, so their distinct identities never alias.
 struct Presentation {
     window: Rc<Window>,
     backend: ActiveBackend,
@@ -122,6 +146,7 @@ struct Presentation {
     shell: Shell,
     last_cursor: Option<PointerPosition>,
     tab_model: TabModel,
+    chrome_text: ChromeText,
     document_frame: Option<DocumentFrame>,
     textures: Vec<(GpuResourceIdentity, GpuResourceIdentity)>,
 }
@@ -134,11 +159,13 @@ impl Presentation {
     /// reconfigures the surface and requests another redraw, so the caller retries
     /// on the next frame instead of failing.
     fn render(&mut self) -> Result<FrameOutcome, WindowError> {
+        self.refresh_chrome_labels()?;
         let content = match self.composite_content() {
             Some(content) => Some(self.realize_content(content)?),
             None => None,
         };
-        let submission = shell_frame(&self.shell, self.surface, self.extent, content);
+        let chrome = self.realize_chrome()?;
+        let submission = shell_frame(chrome, content, self.surface, self.extent);
         self.backend
             .submit(self.surface, &submission)
             .map_err(WindowError::Backend)?;
@@ -269,6 +296,53 @@ impl Presentation {
         Ok(resource)
     }
 
+    /// Rebuilds the chrome labels when the producer reports a locale-generation
+    /// change, and re-pushes the view to the shell.
+    ///
+    /// The producer keeps its built atlas while the locale generation is
+    /// unchanged, so this only clones and re-pushes the view on a real rebuild
+    /// (S1: the atlas builds only on a rebuild, never per frame). A rebuild
+    /// advances the atlas resource generation, so the identity-keyed cache
+    /// realizes the fresh atlas on the next paint. Runtime has no language control
+    /// yet, so the generation advances only when a test drives it.
+    fn refresh_chrome_labels(&mut self) -> Result<(), WindowError> {
+        if self
+            .chrome_text
+            .refresh()
+            .map_err(WindowError::ChromeText)?
+            == ChromeRefresh::Rebuilt
+        {
+            self.shell
+                .set_labels(chrome_label_view(self.chrome_text.view()));
+        }
+        Ok(())
+    }
+
+    /// Realizes the chrome atlas and remaps the shell chrome text quads to it.
+    ///
+    /// The shell paints its chrome text as quads that name the chrome atlas engine
+    /// identity, but the backend draws only from a texture it allocated. This
+    /// allocates one backend texture for the chrome atlas identity (cached, so a
+    /// repeated paint does not allocate again), rewrites the shell chrome quads to
+    /// the allocated identity, and rewrites the upload to the same identity, so
+    /// the submission names only a live backend resource. The chrome atlas keeps a
+    /// distinct producer namespace from the document atlas, so the two never alias
+    /// on one backend texture.
+    fn realize_chrome(&mut self) -> Result<RealizedChrome, WindowError> {
+        let mut commands = self.shell.build_commands();
+        let engine = self.chrome_text.identity();
+        let mut upload = self.chrome_text.upload().clone();
+
+        let backend = self.ensure_texture(engine, &upload.descriptor)?;
+        remap_texture(&mut commands, engine, backend);
+        upload.resource = backend;
+
+        Ok(RealizedChrome {
+            commands,
+            uploads: vec![upload],
+        })
+    }
+
     /// Current viewport rectangle in surface pixel space.
     fn viewport_rect(&self) -> Rect {
         self.shell.layout().rect(ShellRegion::Viewport)
@@ -345,20 +419,23 @@ impl Presentation {
 
 /// Application state driven by the `winit` event loop.
 ///
-/// The injected product core is held until the window is built, then moved into
-/// the presentation. It is `None` before the loop resumes and after that move.
+/// The injected product core and chrome text producer are held until the window
+/// is built, then moved into the presentation. They are `None` before the loop
+/// resumes and after that move.
 struct WindowApplication {
     presentation: Option<Presentation>,
     tab_model: Option<TabModel>,
+    chrome_text: Option<ChromeText>,
     error: Option<WindowError>,
     recovery_deadline: Option<Instant>,
 }
 
 impl WindowApplication {
-    fn new(tab_model: TabModel) -> Self {
+    fn new(tab_model: TabModel, chrome_text: ChromeText) -> Self {
         Self {
             presentation: None,
             tab_model: Some(tab_model),
+            chrome_text: Some(chrome_text),
             error: None,
             recovery_deadline: None,
         }
@@ -381,6 +458,7 @@ impl WindowApplication {
         &mut self,
         event_loop: &ActiveEventLoop,
         tab_model: TabModel,
+        chrome_text: ChromeText,
     ) -> Result<(), WindowError> {
         let attributes = Window::default_attributes()
             .with_title(WINDOW_TITLE)
@@ -417,12 +495,16 @@ impl WindowApplication {
             shell: Shell::new(extent),
             last_cursor: None,
             tab_model,
+            chrome_text,
             document_frame: None,
             textures: Vec::new(),
         };
         presentation
             .shell
             .set_tabs(tab_strip_view(&presentation.tab_model));
+        presentation
+            .shell
+            .set_labels(chrome_label_view(presentation.chrome_text.view()));
         presentation.produce_document()?;
 
         self.presentation = Some(presentation);
@@ -444,11 +526,12 @@ impl ApplicationHandler for WindowApplication {
             return;
         }
 
-        let Some(tab_model) = self.tab_model.take() else {
+        let (Some(tab_model), Some(chrome_text)) = (self.tab_model.take(), self.chrome_text.take())
+        else {
             return;
         };
 
-        if let Err(error) = self.initialize(event_loop, tab_model) {
+        if let Err(error) = self.initialize(event_loop, tab_model, chrome_text) {
             self.error = Some(error);
             event_loop.exit();
         }
@@ -569,18 +652,21 @@ fn remap_texture(commands: &mut [DrawCommand], from: GpuResourceIdentity, to: Gp
     }
 }
 
-/// Merges the shell chrome and the composited document into one submission.
+/// Merges the realized shell chrome and the composited document into one
+/// submission.
 ///
-/// The shell builds the ordered `Clear` and `FillRect` list for its current
-/// chrome state (D1); the compositor offsets and clips the document into the
-/// viewport (D5). This function merges both into one submission for the owned
-/// surface and the current extent. The document paints over the chrome viewport
-/// fill, so it is visible without removing the chrome region.
+/// The shell chrome carries its ordered fills and its chrome text quads, already
+/// remapped to the backend atlas identity (D1); the compositor offsets and clips
+/// the document into the viewport (D5). This function merges both into one
+/// submission for the owned surface and the current extent. The chrome atlas
+/// upload leads the submission uploads and the document upload follows. The
+/// document paints over the chrome viewport fill, so it is visible without
+/// removing the chrome region.
 fn shell_frame(
-    shell: &Shell,
+    chrome: RealizedChrome,
+    content: Option<CompositedDocument>,
     surface: SurfaceIdentity,
     extent: Extent2d,
-    content: Option<CompositedDocument>,
 ) -> FrameSubmission {
     let scene = SceneIdentity::new(
         SceneId::new(1),
@@ -595,12 +681,22 @@ fn shell_frame(
     };
 
     merge_submission(
-        shell.build_commands(),
+        chrome.commands,
+        chrome.uploads,
         content,
         FrameToken::new(1),
         scene,
         target,
     )
+}
+
+/// Converts the producer's placed-run view into the neutral shell label view.
+///
+/// Both views carry the same neutral geometry, one placed glyph run per chrome
+/// region, so this only re-owns the runs for the shell. It names no locale type,
+/// so the window stays free of the localization crate.
+fn chrome_label_view(view: &ChromeTextView) -> LabelView {
+    LabelView::new(view.runs().to_vec())
 }
 
 /// Derives the viewport geometry for one render from the viewport rectangle.

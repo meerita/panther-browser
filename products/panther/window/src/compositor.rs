@@ -60,22 +60,25 @@ pub fn composite_document(
 /// Merges the shell chrome and the composited document into one submission.
 ///
 /// The chrome paints first and the document paints over the viewport region, so
-/// the document is visible without removing the chrome viewport fill. The engine
-/// uploads travel on the submission. The result is validation ready; the backend
-/// validates it before it presents.
+/// the document is visible without removing the chrome viewport fill. The chrome
+/// atlas upload leads the submission uploads and the document uploads follow, so
+/// both the chrome text quads and the document glyph quads name a live backend
+/// resource. The result is validation ready; the backend validates it before it
+/// presents.
 pub fn merge_submission(
     chrome_commands: Vec<DrawCommand>,
+    chrome_uploads: Vec<ResourceUpload>,
     content: Option<CompositedDocument>,
     frame_token: FrameToken,
     scene: SceneIdentity,
     target: PresentationTargetDescriptor,
 ) -> FrameSubmission {
     let mut commands = chrome_commands;
-    let mut uploads = Vec::new();
+    let mut uploads = chrome_uploads;
 
     if let Some(content) = content {
         commands.extend(content.commands);
-        uploads = content.uploads;
+        uploads.extend(content.uploads);
     }
 
     FrameSubmission {
@@ -203,6 +206,30 @@ mod tests {
     fn atlas_upload() -> ResourceUpload {
         ResourceUpload {
             resource: texture(),
+            descriptor: TextureDescriptor {
+                extent: Extent2d::new(2, 2),
+                format: TextureFormatClass::Rgba8Unorm,
+                color_space: ColorSpace::Srgb,
+                alpha_mode: AlphaMode::Opaque,
+                label: None,
+            },
+            pixels: vec![0u8; 2 * 2 * 4],
+        }
+    }
+
+    fn chrome_atlas() -> GpuResourceIdentity {
+        GpuResourceIdentity::new(
+            ProducerNamespace::new(3),
+            ResourceId::new(1),
+            ResourceGeneration::new(1),
+            ResourceKind::GlyphAtlas,
+            DeviceGeneration::new(1),
+        )
+    }
+
+    fn chrome_upload() -> ResourceUpload {
+        ResourceUpload {
+            resource: chrome_atlas(),
             descriptor: TextureDescriptor {
                 extent: Extent2d::new(2, 2),
                 format: TextureFormatClass::Rgba8Unorm,
@@ -361,6 +388,7 @@ mod tests {
 
         let submission = merge_submission(
             chrome,
+            vec![chrome_upload()],
             Some(composited),
             FrameToken::new(1),
             scene(),
@@ -379,12 +407,10 @@ mod tests {
                 .any(|command| matches!(command, DrawCommand::TexturedQuad { .. }))
         );
 
-        // The engine upload is carried through.
-        assert_eq!(submission.uploads.len(), 1);
-        assert_eq!(
-            submission.uploads[0].resource.resource_kind(),
-            ResourceKind::GlyphAtlas
-        );
+        // The chrome atlas upload leads and the document upload follows.
+        assert_eq!(submission.uploads.len(), 2);
+        assert_eq!(submission.uploads[0].resource, chrome_atlas());
+        assert_eq!(submission.uploads[1].resource, texture());
     }
 
     #[test]
@@ -419,7 +445,14 @@ mod tests {
             color: CHROME_COLOR,
         }];
 
-        let submission = merge_submission(chrome, None, FrameToken::new(1), scene(), target());
+        let submission = merge_submission(
+            chrome,
+            Vec::new(),
+            None,
+            FrameToken::new(1),
+            scene(),
+            target(),
+        );
 
         assert_eq!(submission.commands.len(), 1);
         assert!(submission.uploads.is_empty());

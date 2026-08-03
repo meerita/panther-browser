@@ -20,4 +20,4 @@ mod label_set;
 mod producer;
 
 pub use label_set::{ChromeLabels, resolve_labels};
-pub use producer::{ChromeText, ChromeTextError, ChromeTextView};
+pub use producer::{ChromeRefresh, ChromeText, ChromeTextError, ChromeTextView};

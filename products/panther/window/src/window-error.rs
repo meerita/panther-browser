@@ -8,9 +8,11 @@
 //! windowing layer. The `winit` sources are preserved for diagnostics. The
 //! backend source is the Panther-owned interface error, never a raw backend or
 //! native-API type. The content source is the product-core error, never a raw
-//! engine or seam type.
+//! engine or seam type. The chrome text source is the producer error, never a
+//! raw font, shaping, or localization type.
 
 use panther_browser::CoreError;
+use panther_chrome_text::ChromeTextError;
 use purr_graphics::GraphicsError;
 use winit::error::{EventLoopError, OsError};
 
@@ -29,4 +31,6 @@ pub enum WindowError {
     Backend(#[source] GraphicsError),
     #[error("the product core failed")]
     Content(#[source] CoreError),
+    #[error("the chrome text producer failed")]
+    ChromeText(#[source] ChromeTextError),
 }
