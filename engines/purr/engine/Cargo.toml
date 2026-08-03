@@ -16,4 +16,5 @@ workspace = true
 capability-system.workspace = true
 memory.workspace = true
 purr-graphics.workspace = true
+purr-text.workspace = true
 thiserror.workspace = true

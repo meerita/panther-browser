@@ -18,8 +18,6 @@
 
 #[path = "block-layout.rs"]
 mod block_layout;
-#[path = "bundled-font.rs"]
-mod bundled_font;
 #[path = "capability-declarations.rs"]
 mod capability_declarations;
 #[path = "computed-style.rs"]
@@ -36,10 +34,6 @@ mod document_store;
 mod dom_node;
 #[path = "fragment-tree.rs"]
 mod fragment_tree;
-#[path = "glyph-atlas.rs"]
-mod glyph_atlas;
-#[path = "glyph-raster.rs"]
-mod glyph_raster;
 #[path = "html-tokenizer.rs"]
 mod html_tokenizer;
 #[path = "html-tree-builder.rs"]
@@ -58,8 +52,8 @@ mod paint;
 mod platform_support;
 #[path = "style-cascade.rs"]
 mod style_cascade;
-#[path = "text-shaping.rs"]
-mod text_shaping;
+#[path = "text-unit-conversion.rs"]
+mod text_unit_conversion;
 #[path = "user-agent-styles.rs"]
 mod user_agent_styles;
 

@@ -29,13 +29,13 @@
 #![allow(dead_code)]
 
 use crate::block_layout::{LayoutContext, account_fragment, parse_px_length};
-use crate::bundled_font::FontMetrics;
 use crate::css_parser::PropertyId;
 use crate::dom_node::{NodeId, NodeKind};
 use crate::fragment_tree::{BoxFragment, LineFragment, LineItem, TextFragment};
 use crate::layout_tree::{LayoutBox, LayoutError};
 use crate::layout_unit::{LayoutUnit, LogicalPoint, LogicalRect, LogicalSize, ONE_PX_RAW};
-use crate::text_shaping::{GlyphRun, GlyphRunGeneration, GlyphRunId, ShapingRequest};
+use crate::text_unit_conversion::{to_layout_unit, to_text_unit};
+use purr_text::{FontMetrics, GlyphRun, GlyphRunGeneration, GlyphRunId, ShapingRequest};
 
 /// Upper bound for the number of inline items in one formatting context.
 ///
@@ -217,8 +217,8 @@ fn collect_runs(
                     text: text.to_owned(),
                     inline_box,
                     line_height: style.line_height,
-                    ascent: style.metrics.ascent(),
-                    descent: style.metrics.descent(),
+                    ascent: to_layout_unit(style.metrics.ascent()),
+                    descent: to_layout_unit(style.metrics.descent()),
                 });
             }
             _ => {}
@@ -243,7 +243,7 @@ fn shape_run(
         .shape(ShapingRequest {
             font: ctx.font,
             text,
-            size: font_size,
+            size: to_text_unit(font_size),
             run_id,
             generation: GlyphRunGeneration::new(ctx.layout_generation.value()),
         })
@@ -261,7 +261,7 @@ fn resolve_inline_style(
         .unwrap_or(DEFAULT_FONT_SIZE);
     let metrics = ctx
         .font
-        .metrics(font_size)
+        .metrics(to_text_unit(font_size))
         .ok_or(LayoutError::TextShapingFailed)?;
     let line_height_value = style
         .map(|style| style.get(PropertyId::LineHeight))
@@ -291,7 +291,7 @@ fn resolve_line_height(
 ) -> Result<LayoutUnit, LayoutError> {
     let value = value.trim();
     if value == "normal" {
-        return Ok(metrics.line_height());
+        return Ok(to_layout_unit(metrics.line_height()));
     }
     if let Some(length) = parse_px_length(value) {
         return Ok(length.max(LayoutUnit::ZERO));
@@ -302,7 +302,7 @@ fn resolve_line_height(
             .ok_or(LayoutError::Overflow)?;
         return LayoutUnit::from_raw_ratio(scaled, denominator).ok_or(LayoutError::Overflow);
     }
-    Ok(metrics.line_height())
+    Ok(to_layout_unit(metrics.line_height()))
 }
 
 /// Parses a unitless number into a numerator and denominator, or `None`.
@@ -358,7 +358,7 @@ fn build_cells(runs: &[InlineRun]) -> Vec<GlyphCell> {
             cells.push(GlyphCell {
                 run_index,
                 glyph_pos,
-                advance: glyph.advance(),
+                advance: to_layout_unit(glyph.advance()),
                 is_space,
                 inline_box: run.inline_box,
             });
@@ -733,9 +733,11 @@ mod tests {
 
     #[test]
     fn a_unitless_line_height_scales_the_font_size() {
-        let font = crate::bundled_font::BundledFont::load().expect("the bundled font parses");
+        let font = purr_text::BundledFont::load().expect("the bundled font parses");
         let font_size = LayoutUnit::from_px(20).expect("in range");
-        let metrics = font.metrics(font_size).expect("metrics in range");
+        let metrics = font
+            .metrics(to_text_unit(font_size))
+            .expect("metrics in range");
 
         // 1.5 * 20 px = 30 px.
         let resolved = resolve_line_height("1.5", font_size, metrics).expect("in range");
@@ -753,7 +755,7 @@ mod tests {
         // `normal` falls back to the font default line height.
         assert_eq!(
             resolve_line_height("normal", font_size, metrics).expect("in range"),
-            metrics.line_height()
+            to_layout_unit(metrics.line_height())
         );
     }
 }

@@ -18,7 +18,6 @@
 //! and the single glyph-atlas upload) in the engine namespace.
 
 use crate::block_layout::{ConstraintSpace, layout_document};
-use crate::bundled_font::BundledFont;
 use crate::computed_style::{StyleGeneration, resolve_document_style};
 use crate::css_parser::{Origin, Stylesheet, parse_stylesheet};
 use crate::dom_node::Dom;
@@ -32,6 +31,7 @@ use purr_graphics::{
     Color, DeviceGeneration, DrawCommand, Extent2d, ProducerNamespace, Rect, ResourceGeneration,
     ResourceUpload,
 };
+use purr_text::BundledFont;
 
 /// Upper bound for the content width layout receives, in CSS pixels.
 ///
