@@ -123,7 +123,7 @@ struct Presentation {
     last_cursor: Option<PointerPosition>,
     tab_model: TabModel,
     document_frame: Option<DocumentFrame>,
-    textures: Vec<(TextureDescriptor, GpuResourceIdentity)>,
+    textures: Vec<(GpuResourceIdentity, GpuResourceIdentity)>,
 }
 
 impl Presentation {
@@ -212,11 +212,13 @@ impl Presentation {
     /// The seam hands back a document-local display list, not a texture (D1). Each
     /// engine upload names a synthetic resource identity in the engine namespace,
     /// but the backend draws only from a texture it allocated. This allocates one
-    /// texture per upload descriptor, rewrites the upload to the allocated
+    /// texture per engine resource identity, rewrites the upload to the allocated
     /// identity, and rewrites every glyph quad that referenced the engine identity,
     /// so the submission names only live backend resources. Allocation is cached by
-    /// descriptor: the glyph atlas is stable across renders and resizes, so the M2
-    /// fixture allocates one atlas texture for the life of the window.
+    /// engine identity: two producers with matching descriptors but distinct
+    /// identities never alias onto one backend texture, and the M2 fixture atlas is
+    /// stable across renders and resizes, so it allocates one atlas texture for the
+    /// life of the window.
     fn realize_content(
         &mut self,
         content: CompositedDocument,
@@ -229,7 +231,7 @@ impl Presentation {
         let mut realized = Vec::with_capacity(uploads.len());
         for mut upload in uploads {
             let engine_resource = upload.resource;
-            let backend_resource = self.ensure_texture(&upload.descriptor)?;
+            let backend_resource = self.ensure_texture(engine_resource, &upload.descriptor)?;
             remap_texture(&mut commands, engine_resource, backend_resource);
             upload.resource = backend_resource;
             realized.push(upload);
@@ -241,21 +243,21 @@ impl Presentation {
         })
     }
 
-    /// Returns a live backend texture for the descriptor, allocating on first use.
+    /// Returns a live backend texture for the engine resource identity, allocating
+    /// on first use.
     ///
-    /// A cached texture with an equal descriptor is reused, so a repeated render or
-    /// a resize does not allocate again. The backend exposes no free, so the cache
-    /// is the allocation bound: it grows only when a genuinely new descriptor
-    /// appears, which the stable M2 atlas never does.
+    /// A cached texture for an equal engine identity is reused, so a repeated render
+    /// or a resize does not allocate again. Keying by the full engine identity, not
+    /// the descriptor, keeps two producers with matching descriptors on separate
+    /// backend textures, so their pixels never alias. The backend exposes no free,
+    /// so the cache is the allocation bound: it grows only when a genuinely new
+    /// engine identity appears, which the stable M2 atlas never does.
     fn ensure_texture(
         &mut self,
+        engine: GpuResourceIdentity,
         descriptor: &TextureDescriptor,
     ) -> Result<GpuResourceIdentity, WindowError> {
-        if let Some((_, resource)) = self
-            .textures
-            .iter()
-            .find(|(cached, _)| cached == descriptor)
-        {
+        if let Some((_, resource)) = self.textures.iter().find(|(cached, _)| *cached == engine) {
             return Ok(*resource);
         }
 
@@ -263,7 +265,7 @@ impl Presentation {
             .backend
             .allocate_texture(descriptor)
             .map_err(WindowError::Backend)?;
-        self.textures.push((descriptor.clone(), resource));
+        self.textures.push((engine, resource));
         Ok(resource)
     }
 
