@@ -4,13 +4,15 @@
 
 //! Panther application entry point.
 //!
-//! This binary runs the capability bootstrap at startup, prints one diagnostics
-//! summary line derived from the returned reports, and reports the effective
-//! state of each foundational capability through the shell. It then opens the
-//! application window and presents a frame through the selected graphics backend.
+//! This binary is the composition root. It runs the capability bootstrap at
+//! startup, prints one diagnostics summary line derived from the returned reports,
+//! and reports the effective state of each foundational capability through the
+//! shell. It then builds the product core (the tab model), opens and attaches the
+//! first tab, and injects the core into the window, which presents the active
+//! tab's frame through the selected graphics backend.
 
 use anyhow::Result;
-use panther_browser::{Availability, bootstrap};
+use panther_browser::{Availability, TabModel, bootstrap, m2_demonstration_fixture};
 
 fn main() -> Result<()> {
     let result = bootstrap()?;
@@ -28,7 +30,11 @@ fn main() -> Result<()> {
 
     panther_shell::report_startup_capabilities(&reports);
 
-    panther_window::run_window()?;
+    let mut tab_model = TabModel::new();
+    let tab = tab_model.open_tab();
+    tab_model.attach(tab, m2_demonstration_fixture())?;
+
+    panther_window::run_window(tab_model)?;
 
     Ok(())
 }

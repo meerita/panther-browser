@@ -13,6 +13,7 @@ publish = false
 workspace = true
 
 [dependencies]
+panther-browser = { path = "../browser" }
 panther-shell.workspace = true
 purr-embedding = { path = "../../../engines/purr/embedding" }
 purr-graphics.workspace = true

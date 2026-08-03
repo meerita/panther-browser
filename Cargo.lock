@@ -2068,6 +2068,7 @@ dependencies = [
 name = "panther-window"
 version = "0.1.0"
 dependencies = [
+ "panther-browser",
  "panther-shell",
  "purr-embedding",
  "purr-graphics",

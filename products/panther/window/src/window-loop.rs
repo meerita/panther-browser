@@ -11,6 +11,11 @@
 //! the shell state changes (D5). It handles close and returns the first failure it
 //! meets.
 //!
+//! The window is a presenter of the injected product core. It holds the
+//! [`TabModel`] built by the composition root, produces the active tab's frame
+//! through it, and composites that frame into the shell viewport. The window owns
+//! no engine session and no document handle; the product core owns them.
+//!
 //! A native surface can report a transient state right after the window appears
 //! (the drawable is outdated or the window is not yet visible). The backend maps
 //! that state to `SubmissionRejected`. The loop recovers by reconfiguring the
@@ -27,10 +32,9 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
+use panther_browser::TabModel;
 use panther_shell::{KeyInput, PointerPosition, Shell, ShellRegion};
-use purr_embedding::{
-    DocumentFrame, DocumentHandle, DocumentSession, ViewportGeometry, m2_demonstration_fixture,
-};
+use purr_embedding::{DocumentFrame, ViewportGeometry};
 use purr_graphics::{
     AlphaMode, DrawCommand, Extent2d, FrameSubmission, FrameToken, GpuResourceIdentity,
     GraphicsError, MAX_TEXTURE_EXTENT, PresentationTargetDescriptor, Rect, SceneGeneration,
@@ -77,9 +81,9 @@ enum FrameOutcome {
 ///
 /// The call blocks until the window closes. It returns the first initialization
 /// or presentation failure, or `Ok(())` on a clean exit.
-pub fn run_window() -> Result<(), WindowError> {
+pub fn run_window(tab_model: TabModel) -> Result<(), WindowError> {
     let event_loop = EventLoop::new().map_err(WindowError::EventLoop)?;
-    let mut application = WindowApplication::new();
+    let mut application = WindowApplication::new(tab_model);
     event_loop
         .run_app(&mut application)
         .map_err(WindowError::EventLoop)?;
@@ -92,12 +96,12 @@ pub fn run_window() -> Result<(), WindowError> {
 /// clone of the neutral handle for its on-screen present while the loop keeps its
 /// own reference for redraw and resize.
 ///
-/// It also drives the document-attachment seam. It owns the engine session, the
-/// handle to the attached document, and the last produced frame. The frame is
-/// produced synchronously on initialize and on resize only (D6); the compositor
-/// offsets and clips it into the viewport on each redraw. The frame is absent
-/// until the first successful produce, which never happens for a degenerate
-/// (zero-area) viewport.
+/// It presents the injected product core. It holds the [`TabModel`] and the last
+/// frame produced for the active tab. The frame is produced synchronously on
+/// initialize and on resize only (D6); the compositor offsets and clips it into
+/// the viewport on each redraw. The frame is absent until the first successful
+/// produce, which never happens for a degenerate (zero-area) viewport or an empty
+/// active tab.
 struct Presentation {
     window: Rc<Window>,
     backend: ActiveBackend,
@@ -105,8 +109,7 @@ struct Presentation {
     extent: Extent2d,
     shell: Shell,
     last_cursor: Option<PointerPosition>,
-    session: DocumentSession,
-    document: DocumentHandle,
+    tab_model: TabModel,
     document_frame: Option<DocumentFrame>,
     textures: Vec<(TextureDescriptor, GpuResourceIdentity)>,
 }
@@ -161,33 +164,35 @@ impl Presentation {
         Ok(())
     }
 
-    /// Produces the document frame for the current viewport geometry (D6).
+    /// Produces the active tab's frame for the current viewport geometry (D6).
     ///
-    /// The engine lays out in document-local space; only the content extent and
-    /// device pixel ratio cross the seam (D5). A degenerate (zero-area) viewport
-    /// produces no frame and keeps the last one, so a minimized window does not
-    /// discard a valid render. Runs on initialize and on resize only, never per
-    /// continuous frame (S1).
+    /// The product core produces the frame through the seam; only the content
+    /// extent and device pixel ratio cross it (D5). A degenerate (zero-area)
+    /// viewport produces no frame and keeps the last one, so a minimized window
+    /// does not discard a valid render. An active tab with no document yields no
+    /// frame. Runs on initialize and on resize only, never per continuous frame
+    /// (S1).
     fn produce_document(&mut self) -> Result<(), WindowError> {
         let Some(geometry) = viewport_geometry(self.viewport_rect()) else {
             return Ok(());
         };
 
-        let frame = self
-            .session
-            .produce(&self.document, geometry)
-            .map_err(WindowError::Document)?;
-        self.document_frame = Some(frame);
+        self.document_frame = self
+            .tab_model
+            .produce_active(geometry)
+            .map_err(WindowError::Content)?;
         Ok(())
     }
 
     /// Offsets and clips the last document frame into the viewport (D5).
     ///
-    /// Returns `None` when no frame has been produced or the stored frame names a
-    /// superseded generation, so a stale frame never paints (S5).
+    /// Returns `None` when there is no active document, no frame has been produced,
+    /// or the stored frame names a superseded generation, so a stale frame never
+    /// paints (S5).
     fn composite_content(&self) -> Option<CompositedDocument> {
         let frame = self.document_frame.as_ref()?;
-        composite_document(frame, self.viewport_rect(), self.document.generation())
+        let generation = self.tab_model.active_generation()?;
+        composite_document(frame, self.viewport_rect(), generation)
     }
 
     /// Realizes the document uploads on the backend and remaps their identities.
@@ -307,16 +312,21 @@ impl Presentation {
 }
 
 /// Application state driven by the `winit` event loop.
+///
+/// The injected product core is held until the window is built, then moved into
+/// the presentation. It is `None` before the loop resumes and after that move.
 struct WindowApplication {
     presentation: Option<Presentation>,
+    tab_model: Option<TabModel>,
     error: Option<WindowError>,
     recovery_deadline: Option<Instant>,
 }
 
 impl WindowApplication {
-    fn new() -> Self {
+    fn new(tab_model: TabModel) -> Self {
         Self {
             presentation: None,
+            tab_model: Some(tab_model),
             error: None,
             recovery_deadline: None,
         }
@@ -331,7 +341,15 @@ impl WindowApplication {
     }
 
     /// Builds the window, backend, and presentation target.
-    fn initialize(&mut self, event_loop: &ActiveEventLoop) -> Result<(), WindowError> {
+    ///
+    /// The product core is injected: the composition root already opened and
+    /// attached the first tab, so this only moves the core into the presentation
+    /// and produces its first frame.
+    fn initialize(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        tab_model: TabModel,
+    ) -> Result<(), WindowError> {
         let attributes = Window::default_attributes()
             .with_title(WINDOW_TITLE)
             .with_inner_size(LogicalSize::new(INITIAL_WIDTH, INITIAL_HEIGHT));
@@ -359,11 +377,6 @@ impl WindowApplication {
 
         window.request_redraw();
 
-        let mut session = DocumentSession::new();
-        let document = session
-            .attach(m2_demonstration_fixture())
-            .map_err(WindowError::Document)?;
-
         let mut presentation = Presentation {
             window,
             backend,
@@ -371,8 +384,7 @@ impl WindowApplication {
             extent,
             shell: Shell::new(extent),
             last_cursor: None,
-            session,
-            document,
+            tab_model,
             document_frame: None,
             textures: Vec::new(),
         };
@@ -397,7 +409,11 @@ impl ApplicationHandler for WindowApplication {
             return;
         }
 
-        if let Err(error) = self.initialize(event_loop) {
+        let Some(tab_model) = self.tab_model.take() else {
+            return;
+        };
+
+        if let Err(error) = self.initialize(event_loop, tab_model) {
             self.error = Some(error);
             event_loop.exit();
         }
