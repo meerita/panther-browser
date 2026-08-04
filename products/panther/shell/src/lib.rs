@@ -34,6 +34,8 @@ mod pointer_hit_test;
 mod region_layout;
 #[path = "shell.rs"]
 mod shell;
+#[path = "shell-action.rs"]
+mod shell_action;
 #[path = "shell-region.rs"]
 mod shell_region;
 #[path = "tab-strip.rs"]
@@ -44,6 +46,9 @@ pub use draw_command_builder::build_commands;
 pub use labels::LabelView;
 pub use pointer_hit_test::{PointerPosition, hit_test};
 pub use region_layout::{RegionLayout, layout};
-pub use shell::{KeyInput, Shell};
+pub use shell::{
+    ADDRESS_INPUT_MAX_CHARS, KeyInput, Shell, address_input_charset, is_address_input_char,
+};
+pub use shell_action::ShellAction;
 pub use shell_region::{CLEAR_COLOR, ShellRegion};
-pub use tab_strip::{ShellAction, TabStripView};
+pub use tab_strip::TabStripView;

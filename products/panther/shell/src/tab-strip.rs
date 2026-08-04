@@ -5,6 +5,7 @@
 use purr_graphics::Rect;
 
 use crate::pointer_hit_test::{PointerPosition, contains};
+use crate::shell_action::ShellAction;
 
 /// Smallest slot width, so the close sub-rect stays hittable.
 const MIN_SLOT_WIDTH: f32 = 44.0;
@@ -44,17 +45,6 @@ impl TabStripView {
     pub fn active(self) -> Option<usize> {
         self.active
     }
-}
-
-/// Neutral tab action the shell reports from a strip press.
-///
-/// The action carries a slot index, never a `TabId`. The window maps the slot
-/// index to a `TabId` and calls the matching tab-model operation (D3, D5).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ShellAction {
-    ActivateTab(usize),
-    NewTab,
-    CloseTab(usize),
 }
 
 /// Placed rectangles for one strip state inside the band.
