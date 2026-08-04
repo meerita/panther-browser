@@ -11,6 +11,8 @@
 
 use purr_embedding::DocumentHandle;
 
+use crate::address::Address;
+
 /// Stable identity of a tab.
 ///
 /// The identity comes from a monotonic counter owned by the tab model, so it is
@@ -35,11 +37,16 @@ pub(crate) enum TabContent {
     Attached(DocumentHandle),
 }
 
-/// One tab: a stable identity and its current content state.
+/// One tab: a stable identity, its current content state, and its committed address.
+///
+/// The committed address is `None` for a never-navigated tab, so a fresh tab shows
+/// an empty field, and `Some` once anything has been submitted, including
+/// `panther:blank`.
 #[derive(Debug)]
 pub struct Tab {
     id: TabId,
     content: TabContent,
+    address: Option<Address>,
 }
 
 impl Tab {
@@ -47,6 +54,7 @@ impl Tab {
         Self {
             id,
             content: TabContent::Empty,
+            address: None,
         }
     }
 
@@ -60,5 +68,14 @@ impl Tab {
 
     pub(crate) fn set_content(&mut self, content: TabContent) {
         self.content = content;
+    }
+
+    /// The committed address display string, or `None` for a never-navigated tab.
+    pub fn address_text(&self) -> Option<&str> {
+        self.address.as_ref().map(Address::as_str)
+    }
+
+    pub(crate) fn set_address(&mut self, address: Address) {
+        self.address = Some(address);
     }
 }

@@ -17,6 +17,7 @@ purr-embedding = { path = "../../../engines/purr/embedding" }
 capability-system.workspace = true
 panther-localization.workspace = true
 thiserror.workspace = true
+url.workspace = true
 
 [dev-dependencies]
 purr-graphics.workspace = true

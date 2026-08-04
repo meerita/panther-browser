@@ -15,10 +15,24 @@
 //! are never reused. The model caches no produced frame; the consumer produces the
 //! active frame on demand.
 
-use purr_embedding::{DocumentFrame, DocumentGeneration, DocumentSession, ViewportGeometry};
+use purr_embedding::{
+    DocumentFrame, DocumentGeneration, DocumentSession, ViewportGeometry, m2_demonstration_fixture,
+};
 
+use crate::address::{Address, AddressRoute};
 use crate::core_error::CoreError;
 use crate::tab::{Tab, TabContent, TabId};
+
+/// Result of submitting an address.
+///
+/// An unparseable address and a parseable-but-unsupported address both yield the
+/// identical `Rejected` outcome, so a caller cannot distinguish the two (uniform
+/// failure).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AddressOutcome {
+    Committed,
+    Rejected,
+}
 
 /// Owns the tabs, the active tab, and the shared document seam.
 pub struct TabModel {
@@ -66,6 +80,58 @@ impl TabModel {
         let handle = self.session.attach(source)?;
         self.tabs[position].set_content(TabContent::Attached(handle));
         Ok(())
+    }
+
+    /// Submits address text for the active tab.
+    ///
+    /// The text is untrusted input, so it is parsed before any use. A missing
+    /// active tab, an unparseable address, and an unsupported route all leave every
+    /// committed address unchanged and report `Rejected`. `panther:blank` detaches
+    /// the active tab's document and commits the address; `panther:demo` attaches
+    /// the demonstration document and commits the address.
+    pub fn submit_address(&mut self, text: &str) -> Result<AddressOutcome, CoreError> {
+        let Some(active) = self.active else {
+            return Ok(AddressOutcome::Rejected);
+        };
+
+        let Some(position) = self
+            .tabs
+            .iter()
+            .position(|candidate| candidate.id() == active)
+        else {
+            return Ok(AddressOutcome::Rejected);
+        };
+
+        let Some(address) = Address::parse(text) else {
+            return Ok(AddressOutcome::Rejected);
+        };
+
+        match address.route() {
+            AddressRoute::Blank => {
+                if let TabContent::Attached(handle) = *self.tabs[position].content() {
+                    self.session.detach(handle);
+                }
+                self.tabs[position].set_content(TabContent::Empty);
+                self.tabs[position].set_address(address);
+                Ok(AddressOutcome::Committed)
+            }
+            AddressRoute::Demo => {
+                self.attach(active, m2_demonstration_fixture())?;
+                self.tabs[position].set_address(address);
+                Ok(AddressOutcome::Committed)
+            }
+            AddressRoute::Unsupported => Ok(AddressOutcome::Rejected),
+        }
+    }
+
+    /// Returns the active tab's committed address display string, if any.
+    pub fn active_address_text(&self) -> Option<&str> {
+        let active = self.active?;
+        let tab = self
+            .tabs
+            .iter()
+            .find(|candidate| candidate.id() == active)?;
+        tab.address_text()
     }
 
     /// Makes a tab the active tab.
@@ -334,5 +400,70 @@ mod tests {
 
         assert_eq!(model.active_tab(), None);
         assert_eq!(model.produce_active(geometry()), Ok(None));
+    }
+
+    #[test]
+    fn submit_demo_attaches_the_fixture_and_commits_the_address() {
+        let mut model = TabModel::new();
+        model.open_tab();
+
+        assert_eq!(
+            model.submit_address("panther:demo"),
+            Ok(AddressOutcome::Committed)
+        );
+        assert_eq!(model.active_address_text(), Some("panther:demo"));
+        assert!(
+            model
+                .produce_active(geometry())
+                .expect("produce succeeds")
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn submit_blank_detaches_content_and_commits_the_address() {
+        let mut model = TabModel::new();
+        let tab = model.open_tab();
+        model
+            .attach(tab, m2_demonstration_fixture())
+            .expect("attach succeeds");
+
+        assert_eq!(
+            model.submit_address("panther:blank"),
+            Ok(AddressOutcome::Committed)
+        );
+        assert_eq!(model.active_address_text(), Some("panther:blank"));
+        assert_eq!(model.produce_active(geometry()), Ok(None));
+    }
+
+    #[test]
+    fn submit_rejects_unparseable_and_unsupported_input_uniformly() {
+        let mut model = TabModel::new();
+        model.open_tab();
+
+        let unparseable = model.submit_address("not a url");
+        let unsupported = model.submit_address("https://example.com");
+
+        assert_eq!(unparseable, Ok(AddressOutcome::Rejected));
+        assert_eq!(unsupported, Ok(AddressOutcome::Rejected));
+        assert_eq!(model.active_address_text(), None);
+    }
+
+    #[test]
+    fn submit_without_an_active_tab_is_rejected() {
+        let mut model = TabModel::new();
+
+        assert_eq!(
+            model.submit_address("panther:demo"),
+            Ok(AddressOutcome::Rejected)
+        );
+    }
+
+    #[test]
+    fn a_fresh_tab_reports_no_committed_address() {
+        let mut model = TabModel::new();
+        model.open_tab();
+
+        assert_eq!(model.active_address_text(), None);
     }
 }

@@ -19,6 +19,8 @@
 //! document to a tab, activates a tab, and produces the active tab's frame
 //! through [`TabModel`], naming a tab only by its opaque [`TabId`].
 
+#[path = "address.rs"]
+mod address;
 #[path = "capability-assembly.rs"]
 mod capability_assembly;
 #[path = "core-error.rs"]
@@ -42,7 +44,7 @@ pub use product_capabilities::{
 };
 pub use product_policy::BootstrapConfig;
 pub use tab::{Tab, TabId};
-pub use tab_model::TabModel;
+pub use tab_model::{AddressOutcome, TabModel};
 
 // The bundled M2 demonstration source, surfaced so the composition root can
 // attach it to the first tab without reaching the engine core or a filesystem.
