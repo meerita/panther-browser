@@ -23,15 +23,15 @@
 
 use locale::Locale;
 use panther_localization::{ActiveLocaleState, LocaleGeneration, MessageCatalog};
-use panther_shell::ShellRegion;
+use panther_shell::{ShellRegion, address_input_charset};
 use purr_graphics::{
     DeviceGeneration, GpuResourceIdentity, ProducerNamespace, ResourceGeneration, ResourceId,
     ResourceUpload,
 };
 use purr_text::{
-    BundledFont, CmapOneToOneAdapter, FontError, GlyphAtlasError, GlyphKey, GlyphRun,
-    GlyphRunGeneration, GlyphRunId, ONE_PX_RAW, PlacedGlyphRun, ShapingError, ShapingRequest,
-    TextShapingAdapter, TextUnit,
+    BundledFont, CmapOneToOneAdapter, FontError, FontMetrics, GlyphAtlas, GlyphAtlasError,
+    GlyphKey, GlyphRun, GlyphRunGeneration, GlyphRunId, ONE_PX_RAW, PlacedGlyphRun, ShapingError,
+    ShapingRequest, TextShapingAdapter, TextUnit,
 };
 
 use crate::label_set::{ChromeLabels, resolve_labels};
@@ -129,6 +129,11 @@ struct ChromeBuild {
     labels: [(ShellRegion, String); 4],
     view: ChromeTextView,
     upload: ResourceUpload,
+    // The built atlas and metrics are retained so live address text shapes against
+    // the same fixed atlas without a rebuild (D9). The atlas pre-packs the accepted
+    // address glyph set, so `shape_address` never rasterizes a glyph per keystroke.
+    atlas: GlyphAtlas,
+    metrics: FontMetrics,
 }
 
 /// The chrome text producer.
@@ -206,6 +211,31 @@ impl ChromeText {
         self.state.change_language(language);
     }
 
+    /// Shapes bounded live address text into a placed run against the chrome atlas.
+    ///
+    /// The text shapes at the chrome size with the same adapter as the labels and
+    /// combines with the already-built chrome atlas, so no atlas is rebuilt (D9).
+    /// The atlas pre-packs the accepted address glyph set, so every accepted
+    /// character renders; a character outside that set has no packed glyph and
+    /// produces no visible placement (its advance folds into the previous glyph).
+    /// The shell already excludes such characters at input, so this is a
+    /// defense-in-depth consequence, not a new rejection path.
+    pub fn shape_address(&self, text: &str) -> Result<PlacedGlyphRun, ChromeTextError> {
+        let run = CmapOneToOneAdapter.shape(ShapingRequest {
+            font: &self.font,
+            text,
+            size: CHROME_FONT_SIZE,
+            run_id: GlyphRunId::new(1),
+            generation: GlyphRunGeneration::new(1),
+        })?;
+
+        Ok(PlacedGlyphRun::from_shaped_run(
+            &run,
+            &self.build.atlas,
+            self.build.metrics,
+        ))
+    }
+
     /// The neutral chrome text view for the shell.
     pub fn view(&self) -> &ChromeTextView {
         &self.build.view
@@ -253,6 +283,23 @@ fn build_atlas(
         }
     }
 
+    // Pre-pack one glyph per accepted address character once, alongside the label
+    // glyphs (D9). The set is the shell accepted-character set (printable ASCII),
+    // so live address text shapes against a fixed atlas. A character outside this
+    // set has no packed glyph and renders nothing; non-Latin scripts and symbols
+    // are an accepted, documented limitation of this pass, not a defect.
+    let charset: String = address_input_charset().collect();
+    let charset_run = CmapOneToOneAdapter.shape(ShapingRequest {
+        font,
+        text: &charset,
+        size: CHROME_FONT_SIZE,
+        run_id: GlyphRunId::new(labels.entries().len() as u32 + 1),
+        generation: GlyphRunGeneration::new(1),
+    })?;
+    for positioned in charset_run.glyphs() {
+        keys.push(GlyphKey::new(positioned.glyph(), CHROME_FONT_SIZE));
+    }
+
     let atlas = purr_text::build_glyph_atlas(
         font,
         &keys,
@@ -276,12 +323,15 @@ fn build_atlas(
             })
             .collect(),
     };
+    let upload = atlas.upload().clone();
 
     Ok(ChromeBuild {
         generation: labels.generation(),
         labels: labels.entries().clone(),
         view,
-        upload: atlas.upload().clone(),
+        upload,
+        atlas,
+        metrics,
     })
 }
 
@@ -395,6 +445,48 @@ mod tests {
         assert!(after.resource_generation().value() > before.resource_generation().value());
         // The view changed with the new language, so the shell repaints.
         assert_ne!(producer.view(), &english);
+    }
+
+    #[test]
+    fn the_chrome_atlas_packs_a_glyph_for_the_accepted_input_set() {
+        let producer = producer();
+
+        // A digit and a URL punctuation mark are outside the four catalogue
+        // labels, so their glyphs prove the accepted set was pre-packed.
+        let run = producer.shape_address("3/").expect("the address shapes");
+
+        assert_eq!(run.glyphs().len(), 2);
+    }
+
+    #[test]
+    fn shape_address_builds_a_run_against_the_chrome_atlas() {
+        let producer = producer();
+
+        let run = producer.shape_address("ab").expect("the address shapes");
+
+        assert_eq!(run.glyphs().len(), 2);
+        assert_eq!(run.atlas(), producer.identity());
+    }
+
+    #[test]
+    fn shape_address_drops_a_glyph_outside_the_packed_set() {
+        let producer = producer();
+
+        // The middle character is outside the packed ASCII set, so it renders
+        // nothing while the surrounding accepted glyphs remain.
+        let run = producer.shape_address("añb").expect("the address shapes");
+
+        assert_eq!(run.glyphs().len(), 2);
+    }
+
+    #[test]
+    fn shape_address_does_not_change_the_atlas_identity() {
+        let producer = producer();
+        let identity = producer.identity();
+
+        producer.shape_address("panther:demo").expect("shapes");
+
+        assert_eq!(producer.identity(), identity);
     }
 
     #[test]

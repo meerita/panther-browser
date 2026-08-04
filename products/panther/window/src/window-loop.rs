@@ -32,7 +32,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use panther_browser::TabModel;
-use panther_chrome_text::{ChromeRefresh, ChromeText, ChromeTextView};
+use panther_chrome_text::{ChromeRefresh, ChromeText};
 use panther_shell::{
     KeyInput, LabelView, PointerPosition, Shell, ShellAction, ShellRegion, TabStripView,
 };
@@ -311,10 +311,33 @@ impl Presentation {
             .map_err(WindowError::ChromeText)?
             == ChromeRefresh::Rebuilt
         {
-            self.shell
-                .set_labels(chrome_label_view(self.chrome_text.view()));
+            self.refresh_address_labels()?;
         }
         Ok(())
+    }
+
+    /// Composes the chrome label view and pushes it to the shell.
+    ///
+    /// The three navigation runs come from the producer unchanged. The address
+    /// field shows the catalogue placeholder run when the edit buffer is empty and
+    /// the field is unfocused, and the live-shaped buffer otherwise (D5, D7). The
+    /// shell marks itself dirty only on a real change, so a redundant recompose
+    /// drives no repaint. Recomposing happens per input event, not per frame, so
+    /// the atlas is never rebuilt from a keystroke (D9).
+    fn refresh_address_labels(&mut self) -> Result<(), WindowError> {
+        let labels = self.compose_labels()?;
+        self.shell.set_labels(labels);
+        Ok(())
+    }
+
+    /// Builds the neutral label view for the current chrome and address state.
+    fn compose_labels(&self) -> Result<LabelView, WindowError> {
+        let address_focused = self.shell.focused() == Some(ShellRegion::AddressField);
+        compose_labels(
+            &self.chrome_text,
+            self.shell.address_text(),
+            address_focused,
+        )
     }
 
     /// Realizes the chrome atlas and remaps the shell chrome text quads to it.
@@ -369,6 +392,7 @@ impl Presentation {
         if let Some(action) = self.shell.pointer_pressed(position) {
             self.apply_shell_action(action)?;
         }
+        self.refresh_address_labels()?;
         self.request_redraw_if_dirty();
         Ok(())
     }
@@ -413,6 +437,7 @@ impl Presentation {
         if let Some(action) = self.shell.deliver_key(key) {
             self.apply_shell_action(action)?;
         }
+        self.refresh_address_labels()?;
         self.request_redraw_if_dirty();
         Ok(())
     }
@@ -526,10 +551,8 @@ impl WindowApplication {
         presentation
             .shell
             .set_tabs(tab_strip_view(&presentation.tab_model));
-        presentation
-            .shell
-            .set_labels(chrome_label_view(presentation.chrome_text.view()));
         presentation.push_committed_address();
+        presentation.refresh_address_labels()?;
         presentation.produce_document()?;
 
         self.presentation = Some(presentation);
@@ -725,13 +748,36 @@ fn shell_frame(
     )
 }
 
-/// Converts the producer's placed-run view into the neutral shell label view.
+/// Composes the neutral label view from the producer view and the address state.
 ///
-/// Both views carry the same neutral geometry, one placed glyph run per chrome
-/// region, so this only re-owns the runs for the shell. It names no locale type,
-/// so the window stays free of the localization crate.
-fn chrome_label_view(view: &ChromeTextView) -> LabelView {
-    LabelView::new(view.runs().to_vec())
+/// It keeps every non-address run from the producer view unchanged and selects the
+/// address run: the catalogue placeholder run when the edit buffer is empty and the
+/// field is unfocused, else the live run shaped against the pre-packed chrome atlas
+/// (D5, D7, D9). It never rebuilds the atlas, so shaping stays cheap per event.
+fn compose_labels(
+    chrome_text: &ChromeText,
+    address_text: &str,
+    address_focused: bool,
+) -> Result<LabelView, WindowError> {
+    let show_placeholder = address_text.is_empty() && !address_focused;
+
+    let view = chrome_text.view();
+    let mut runs = Vec::with_capacity(view.runs().len());
+    for (region, run) in view.runs() {
+        if *region == ShellRegion::AddressField && !show_placeholder {
+            continue;
+        }
+        runs.push((*region, run.clone()));
+    }
+
+    if !show_placeholder {
+        let live = chrome_text
+            .shape_address(address_text)
+            .map_err(WindowError::ChromeText)?;
+        runs.push((ShellRegion::AddressField, live));
+    }
+
+    Ok(LabelView::new(runs))
 }
 
 /// Derives the viewport geometry for one render from the viewport rectangle.
@@ -833,6 +879,15 @@ fn ensure_handles(window: &Window) -> Result<(), WindowError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use locale::Locale;
+    use panther_localization::{ActiveLocaleState, LocaleRequest, LocaleResolver, MessageCatalog};
+
+    fn chrome_text() -> ChromeText {
+        let english = Locale::parse("en").expect("valid identifier");
+        let resolver = LocaleResolver::new(vec![english.clone()], vec![english]);
+        let state = ActiveLocaleState::new(resolver, LocaleRequest::new());
+        ChromeText::new(state, MessageCatalog::load()).expect("the producer builds")
+    }
 
     fn active_id(model: &TabModel) -> Option<u64> {
         model
@@ -987,5 +1042,45 @@ mod tests {
         .expect("submit applies");
 
         assert_eq!(model.active_address_text(), None);
+    }
+
+    const NAVIGATION_REGIONS: [ShellRegion; 3] = [
+        ShellRegion::NavigationBack,
+        ShellRegion::NavigationForward,
+        ShellRegion::NavigationReload,
+    ];
+
+    #[test]
+    fn an_empty_unfocused_address_composes_the_catalogue_placeholder_run() {
+        let chrome = chrome_text();
+
+        let labels = compose_labels(&chrome, "", false).expect("the labels compose");
+
+        let placeholder = chrome
+            .view()
+            .run(ShellRegion::AddressField)
+            .expect("the catalogue placeholder run");
+        assert_eq!(labels.run(ShellRegion::AddressField), Some(placeholder));
+        for region in NAVIGATION_REGIONS {
+            assert_eq!(labels.run(region), chrome.view().run(region));
+        }
+    }
+
+    #[test]
+    fn a_non_empty_buffer_composes_the_live_run() {
+        let chrome = chrome_text();
+
+        let labels = compose_labels(&chrome, "panther:demo", true).expect("the labels compose");
+
+        let live = chrome.shape_address("panther:demo").expect("the live run");
+        assert_eq!(labels.run(ShellRegion::AddressField), Some(&live));
+        let placeholder = chrome
+            .view()
+            .run(ShellRegion::AddressField)
+            .expect("the catalogue placeholder run");
+        assert_ne!(labels.run(ShellRegion::AddressField), Some(placeholder));
+        for region in NAVIGATION_REGIONS {
+            assert_eq!(labels.run(region), chrome.view().run(region));
+        }
     }
 }
