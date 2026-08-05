@@ -8,28 +8,55 @@ use crate::draw_command_builder::build_commands;
 use crate::labels::LabelView;
 use crate::pointer_hit_test::{PointerPosition, hit_test};
 use crate::region_layout::{RegionLayout, layout};
+use crate::shell_action::ShellAction;
 use crate::shell_region::ShellRegion;
-use crate::tab_strip::{ShellAction, TabStripView, resolve, strip_layout};
+use crate::tab_strip::{TabStripView, resolve, strip_layout};
 
-/// A raw key event forwarded from the window seam.
+/// A key event forwarded from the window seam.
 ///
-/// The shell names no windowing type, so it carries the key as a neutral raw
-/// value. The window seam converts its native key into this value. The shell does
-/// not interpret the value at M1.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct KeyInput {
-    raw: u32,
+/// The shell names no windowing type, so the window seam converts its native key
+/// into this closed set. The set carries exactly what a single-line address field
+/// needs: a typed character and the three edit keys (D2). It has no cursor,
+/// selection, or composition key, so it does not grow the field into a general
+/// text editor (D1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum KeyInput {
+    Character(char),
+    Backspace,
+    Enter,
+    Escape,
 }
 
-impl KeyInput {
-    pub fn new(raw: u32) -> Self {
-        Self { raw }
-    }
+/// Largest number of characters the address edit buffer accepts.
+///
+/// A conservative URL-length ceiling that bounds the buffer against untrusted key
+/// input. A keystroke beyond the bound is not appended (D8).
+pub const ADDRESS_INPUT_MAX_CHARS: usize = 2048;
 
-    /// Neutral raw key value the window forwarded.
-    pub fn raw(self) -> u32 {
-        self.raw
-    }
+/// Inclusive ASCII code-point bounds of the accepted address input set.
+///
+/// The accepted set is printable ASCII including space (`0x20..=0x7E`). The
+/// predicate and the enumeration both derive from this one range, so the accepted
+/// characters and the pre-packed glyph set never diverge (single source of truth).
+const ADDRESS_INPUT_FIRST: u8 = 0x20;
+const ADDRESS_INPUT_LAST: u8 = 0x7E;
+
+/// Whether a typed character is accepted into the address edit buffer.
+///
+/// A character outside the accepted set is not appended, so the buffer holds only
+/// characters the chrome atlas pre-packs (D9).
+pub fn is_address_input_char(character: char) -> bool {
+    let code = character as u32;
+    code >= ADDRESS_INPUT_FIRST as u32 && code <= ADDRESS_INPUT_LAST as u32
+}
+
+/// Every character in the accepted address input set, in code-point order.
+///
+/// The chrome text producer packs one glyph per character in this set once, so
+/// live address text shapes against a fixed atlas (D9). The set derives from the
+/// same range as [`is_address_input_char`], so the two never diverge.
+pub fn address_input_charset() -> impl Iterator<Item = char> {
+    (ADDRESS_INPUT_FIRST..=ADDRESS_INPUT_LAST).map(char::from)
 }
 
 /// Interaction state and input router for the minimal shell.
@@ -46,6 +73,11 @@ pub struct Shell {
     labels: LabelView,
     hovered: Option<ShellRegion>,
     focused: Option<ShellRegion>,
+    // The edit buffer and the committed baseline hold raw user data (typed
+    // address characters), not localized UI prose. They are not a localized-message
+    // UI text sink, so the internationalization type barrier does not apply here.
+    address_buffer: String,
+    committed_address: String,
     dirty: bool,
 }
 
@@ -59,6 +91,8 @@ impl Shell {
             labels: LabelView::default(),
             hovered: None,
             focused: None,
+            address_buffer: String::new(),
+            committed_address: String::new(),
             dirty: true,
         }
     }
@@ -119,6 +153,10 @@ impl Shell {
     pub fn pointer_pressed(&mut self, position: PointerPosition) -> Option<ShellAction> {
         let focused = hit_test(&self.layout, position);
         if focused != self.focused {
+            if self.focused == Some(ShellRegion::AddressField) {
+                self.address_buffer.clear();
+                self.address_buffer.push_str(&self.committed_address);
+            }
             self.focused = focused;
             self.dirty = true;
         }
@@ -131,14 +169,66 @@ impl Shell {
         resolve(&strip, position)
     }
 
-    /// Returns the focused region as the key delivery target.
+    /// Replaces the committed address baseline and resets the edit buffer to it.
     ///
-    /// The key payload is unused at M1: the shell has no text consumer yet. The
-    /// method exists so the window exercises the delivery seam that a later phase
-    /// extends into real keyboard handling.
-    pub fn deliver_key(&self, key: KeyInput) -> Option<ShellRegion> {
-        let _ = key;
-        self.focused
+    /// The window pushes the active tab's committed address on every tab change and
+    /// after a submit, so the field reflects the model and a rejected submit visibly
+    /// reverts (D5, D7). The shell marks itself dirty only on a real change. The
+    /// string is raw user data, not a localized UI text sink.
+    pub fn set_committed_address(&mut self, text: String) {
+        let changed = self.committed_address != text || self.address_buffer != text;
+        self.committed_address.clear();
+        self.committed_address.push_str(&text);
+        self.address_buffer = text;
+        if changed {
+            self.dirty = true;
+        }
+    }
+
+    /// The current address edit buffer, for the window to shape into glyphs.
+    pub fn address_text(&self) -> &str {
+        &self.address_buffer
+    }
+
+    /// Applies a key to the address field and reports a submit action.
+    ///
+    /// The key acts only when the address field is focused; otherwise it changes
+    /// nothing. A character is appended only when it is accepted and the buffer is
+    /// below the bound (D8), backspace removes one character, and escape reverts the
+    /// buffer to the committed baseline (D7). Enter reports the buffer as a submit
+    /// action; it does not clear the buffer, because the window pushes the committed
+    /// text back after the submit resolves. Only `Enter` produces an action.
+    pub fn deliver_key(&mut self, key: KeyInput) -> Option<ShellAction> {
+        if self.focused != Some(ShellRegion::AddressField) {
+            return None;
+        }
+
+        match key {
+            KeyInput::Character(character) => {
+                if is_address_input_char(character)
+                    && self.address_buffer.chars().count() < ADDRESS_INPUT_MAX_CHARS
+                {
+                    self.address_buffer.push(character);
+                    self.dirty = true;
+                }
+                None
+            }
+            KeyInput::Backspace => {
+                if self.address_buffer.pop().is_some() {
+                    self.dirty = true;
+                }
+                None
+            }
+            KeyInput::Escape => {
+                if self.address_buffer != self.committed_address {
+                    self.address_buffer.clear();
+                    self.address_buffer.push_str(&self.committed_address);
+                    self.dirty = true;
+                }
+                None
+            }
+            KeyInput::Enter => Some(ShellAction::SubmitAddress(self.address_buffer.clone())),
+        }
     }
 
     /// Whether the shell state changed since the last paint.
@@ -273,16 +363,139 @@ mod tests {
         assert!(!shell.is_dirty());
     }
 
+    fn focus_address_field(shell: &mut Shell) {
+        let position = center_of(shell, ShellRegion::AddressField);
+        shell.pointer_pressed(position);
+    }
+
     #[test]
-    fn deliver_key_returns_focus_and_changes_no_state() {
+    fn deliver_key_appends_a_character_only_when_the_address_field_is_focused() {
         let mut shell = shell();
-        shell.pointer_pressed(center_of(&shell, ShellRegion::AddressField));
+        focus_address_field(&mut shell);
         shell.clear_dirty();
 
-        let target = shell.deliver_key(KeyInput::new(42));
+        let action = shell.deliver_key(KeyInput::Character('a'));
 
-        assert_eq!(target, Some(ShellRegion::AddressField));
-        assert_eq!(shell.focused(), Some(ShellRegion::AddressField));
+        assert_eq!(action, None);
+        assert_eq!(shell.address_text(), "a");
+        assert!(shell.is_dirty());
+    }
+
+    #[test]
+    fn deliver_key_ignores_a_key_when_a_non_address_region_is_focused() {
+        let mut shell = shell();
+        shell.pointer_pressed(center_of(&shell, ShellRegion::Viewport));
+        shell.clear_dirty();
+
+        let action = shell.deliver_key(KeyInput::Character('a'));
+
+        assert_eq!(action, None);
+        assert_eq!(shell.address_text(), "");
+        assert!(!shell.is_dirty());
+    }
+
+    #[test]
+    fn backspace_removes_the_last_character_and_is_a_no_op_when_empty() {
+        let mut shell = shell();
+        focus_address_field(&mut shell);
+        shell.deliver_key(KeyInput::Character('a'));
+        shell.deliver_key(KeyInput::Character('b'));
+
+        shell.deliver_key(KeyInput::Backspace);
+        assert_eq!(shell.address_text(), "a");
+
+        shell.deliver_key(KeyInput::Backspace);
+        assert_eq!(shell.address_text(), "");
+
+        shell.clear_dirty();
+        shell.deliver_key(KeyInput::Backspace);
+        assert_eq!(shell.address_text(), "");
+        assert!(!shell.is_dirty());
+    }
+
+    #[test]
+    fn escape_resets_the_buffer_to_the_committed_baseline() {
+        let mut shell = shell();
+        shell.set_committed_address("panther:demo".to_owned());
+        focus_address_field(&mut shell);
+        shell.deliver_key(KeyInput::Character('x'));
+        assert_eq!(shell.address_text(), "panther:demox");
+
+        shell.deliver_key(KeyInput::Escape);
+
+        assert_eq!(shell.address_text(), "panther:demo");
+    }
+
+    #[test]
+    fn enter_reports_a_submit_action_with_the_current_buffer() {
+        let mut shell = shell();
+        focus_address_field(&mut shell);
+        shell.deliver_key(KeyInput::Character('h'));
+        shell.deliver_key(KeyInput::Character('i'));
+
+        let action = shell.deliver_key(KeyInput::Enter);
+
+        assert_eq!(action, Some(ShellAction::SubmitAddress("hi".to_owned())));
+        assert_eq!(shell.address_text(), "hi");
+    }
+
+    #[test]
+    fn the_buffer_stops_accepting_characters_at_the_bound() {
+        let mut shell = shell();
+        focus_address_field(&mut shell);
+
+        for _ in 0..ADDRESS_INPUT_MAX_CHARS {
+            shell.deliver_key(KeyInput::Character('a'));
+        }
+        assert_eq!(
+            shell.address_text().chars().count(),
+            ADDRESS_INPUT_MAX_CHARS
+        );
+
+        shell.deliver_key(KeyInput::Character('a'));
+        assert_eq!(
+            shell.address_text().chars().count(),
+            ADDRESS_INPUT_MAX_CHARS
+        );
+    }
+
+    #[test]
+    fn a_character_outside_the_accepted_set_is_not_appended() {
+        let mut shell = shell();
+        focus_address_field(&mut shell);
+
+        shell.deliver_key(KeyInput::Character('a'));
+        shell.deliver_key(KeyInput::Character('ñ'));
+
+        assert_eq!(shell.address_text(), "a");
+    }
+
+    #[test]
+    fn pointer_press_reverts_the_buffer_when_focus_moves_away_from_the_address_field() {
+        let mut shell = shell();
+        shell.set_committed_address("panther:demo".to_owned());
+        focus_address_field(&mut shell);
+        shell.deliver_key(KeyInput::Character('x'));
+        assert_eq!(shell.address_text(), "panther:demox");
+
+        shell.pointer_pressed(center_of(&shell, ShellRegion::Viewport));
+
+        assert_eq!(shell.address_text(), "panther:demo");
+    }
+
+    #[test]
+    fn set_committed_address_resets_the_buffer_and_marks_dirty_on_a_real_change_only() {
+        let mut shell = shell();
+        focus_address_field(&mut shell);
+        shell.deliver_key(KeyInput::Character('x'));
+        shell.clear_dirty();
+
+        shell.set_committed_address("panther:demo".to_owned());
+        assert_eq!(shell.address_text(), "panther:demo");
+        assert!(shell.is_dirty());
+
+        shell.clear_dirty();
+        shell.set_committed_address("panther:demo".to_owned());
         assert!(!shell.is_dirty());
     }
 

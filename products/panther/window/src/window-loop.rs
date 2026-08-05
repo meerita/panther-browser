@@ -28,12 +28,11 @@
 //! window outlives the backend, so the handle the backend borrowed stays valid
 //! across later presents.
 
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use panther_browser::TabModel;
-use panther_chrome_text::{ChromeRefresh, ChromeText, ChromeTextView};
+use panther_chrome_text::{ChromeRefresh, ChromeText};
 use panther_shell::{
     KeyInput, LabelView, PointerPosition, Shell, ShellAction, ShellRegion, TabStripView,
 };
@@ -47,9 +46,9 @@ use purr_graphics::{
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalPosition, PhysicalSize};
-use winit::event::{ElementState, WindowEvent};
+use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
-use winit::keyboard::PhysicalKey;
+use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowId};
 
 use crate::active_backend::{ActiveBackend, create_active_backend};
@@ -312,10 +311,33 @@ impl Presentation {
             .map_err(WindowError::ChromeText)?
             == ChromeRefresh::Rebuilt
         {
-            self.shell
-                .set_labels(chrome_label_view(self.chrome_text.view()));
+            self.refresh_address_labels()?;
         }
         Ok(())
+    }
+
+    /// Composes the chrome label view and pushes it to the shell.
+    ///
+    /// The three navigation runs come from the producer unchanged. The address
+    /// field shows the catalogue placeholder run when the edit buffer is empty and
+    /// the field is unfocused, and the live-shaped buffer otherwise (D5, D7). The
+    /// shell marks itself dirty only on a real change, so a redundant recompose
+    /// drives no repaint. Recomposing happens per input event, not per frame, so
+    /// the atlas is never rebuilt from a keystroke (D9).
+    fn refresh_address_labels(&mut self) -> Result<(), WindowError> {
+        let labels = self.compose_labels()?;
+        self.shell.set_labels(labels);
+        Ok(())
+    }
+
+    /// Builds the neutral label view for the current chrome and address state.
+    fn compose_labels(&self) -> Result<LabelView, WindowError> {
+        let address_focused = self.shell.focused() == Some(ShellRegion::AddressField);
+        compose_labels(
+            &self.chrome_text,
+            self.shell.address_text(),
+            address_focused,
+        )
     }
 
     /// Realizes the chrome atlas and remaps the shell chrome text quads to it.
@@ -356,7 +378,7 @@ impl Presentation {
         self.request_redraw_if_dirty();
     }
 
-    /// Forwards a pointer press and applies any returned tab action.
+    /// Forwards a pointer press and applies any returned action.
     ///
     /// A press with no prior cursor position has no location to hit-test, so it is
     /// ignored. A strip press returns a neutral [`ShellAction`] the window applies
@@ -368,29 +390,56 @@ impl Presentation {
         };
 
         if let Some(action) = self.shell.pointer_pressed(position) {
-            self.apply_tab_action(action)?;
+            self.apply_shell_action(action)?;
         }
+        self.refresh_address_labels()?;
         self.request_redraw_if_dirty();
         Ok(())
     }
 
-    /// Applies a tab action to the model, refreshes the strip, and re-produces.
+    /// Applies a shell action to the model, refreshes the strip and the committed
+    /// address, and re-produces the active frame.
     ///
-    /// The neutral action carries a slot index; the window maps it to the tab at
-    /// that index and calls the matching model operation, enforcing `MAX_TABS`
-    /// before a new tab (D8). It then rebuilds the neutral view from the model and
-    /// pushes it to the shell, and re-produces the active frame, since the active
-    /// tab or its content may have changed (D9).
-    fn apply_tab_action(&mut self, action: ShellAction) -> Result<(), WindowError> {
-        apply_tab_action(&mut self.tab_model, action)?;
+    /// A tab action carries a slot index the window maps to a `TabId`, enforcing
+    /// `MAX_TABS` before a new tab (D8); a submit action carries the raw typed text
+    /// the model parses (D3, D4). Either can change the active tab or its content,
+    /// so the window rebuilds the neutral strip view, pushes the active tab's
+    /// committed address (so a rejected submit visibly reverts, D7), and re-produces
+    /// the active frame (D9). The set views mark the shell dirty only on a real
+    /// change, so an unchanged push drives no repaint.
+    fn apply_shell_action(&mut self, action: ShellAction) -> Result<(), WindowError> {
+        apply_shell_action(&mut self.tab_model, action)?;
         self.shell.set_tabs(tab_strip_view(&self.tab_model));
+        self.push_committed_address();
         self.produce_document()
     }
 
-    /// Forwards a key to the focused region. It is a no-op at M1 and never
-    /// requests a redraw.
-    fn key_pressed(&self, key: KeyInput) {
-        let _ = self.shell.deliver_key(key);
+    /// Pushes the active tab's committed address into the shell.
+    ///
+    /// A tab with no committed address (never navigated) pushes an empty string, so
+    /// the field shows the placeholder (D5). The shell marks itself dirty only on a
+    /// real change.
+    fn push_committed_address(&mut self) {
+        let text = self
+            .tab_model
+            .active_address_text()
+            .unwrap_or_default()
+            .to_owned();
+        self.shell.set_committed_address(text);
+    }
+
+    /// Forwards a key to the shell and applies any returned submit action.
+    ///
+    /// The shell mutates its address edit buffer and reports a submit action only on
+    /// Enter while the address field is focused (D1). A redraw is requested only
+    /// when the shell changed since the last paint (D5).
+    fn key_pressed(&mut self, key: KeyInput) -> Result<(), WindowError> {
+        if let Some(action) = self.shell.deliver_key(key) {
+            self.apply_shell_action(action)?;
+        }
+        self.refresh_address_labels()?;
+        self.request_redraw_if_dirty();
+        Ok(())
     }
 
     /// Requests a redraw only when the shell changed since the last paint (D5).
@@ -502,9 +551,8 @@ impl WindowApplication {
         presentation
             .shell
             .set_tabs(tab_strip_view(&presentation.tab_model));
-        presentation
-            .shell
-            .set_labels(chrome_label_view(presentation.chrome_text.view()));
+        presentation.push_committed_address();
+        presentation.refresh_address_labels()?;
         presentation.produce_document()?;
 
         self.presentation = Some(presentation);
@@ -570,7 +618,12 @@ impl ApplicationHandler for WindowApplication {
                 }
             }
             WindowEvent::KeyboardInput { event: key, .. } if key.state == ElementState::Pressed => {
-                presentation.key_pressed(to_key_input(key.physical_key));
+                if let Some(input) = to_key_input(&key)
+                    && let Err(error) = presentation.key_pressed(input)
+                {
+                    self.error = Some(error);
+                    event_loop.exit();
+                }
             }
             WindowEvent::RedrawRequested => match presentation.render() {
                 Ok(FrameOutcome::Presented) => {
@@ -604,15 +657,17 @@ fn tab_strip_view(model: &TabModel) -> TabStripView {
     TabStripView::new(model.tabs().len(), active)
 }
 
-/// Applies one neutral tab action to the model.
+/// Applies one neutral shell action to the model.
 ///
 /// The window is the sole index-to-`TabId` mapper (D3) and the sole enforcer of
 /// the `MAX_TABS` bound (D8): a `NewTab` at the bound is ignored, and an
 /// `ActivateTab` or `CloseTab` for a slot index that names no tab is a no-op. A
 /// slot index resolves to a tab through insertion order, so it never confuses one
-/// tab with another. The model owns its errors; a rejected activate is mapped to
-/// a content error.
-fn apply_tab_action(model: &mut TabModel, action: ShellAction) -> Result<(), WindowError> {
+/// tab with another. A `SubmitAddress` carries raw typed text the model parses and
+/// resolves (D3, D4); the model reports rejection as an outcome the field revert
+/// already handles, so the window drops the outcome here. The model owns its
+/// errors; a rejected activate is mapped to a content error.
+fn apply_shell_action(model: &mut TabModel, action: ShellAction) -> Result<(), WindowError> {
     match action {
         ShellAction::ActivateTab(index) => {
             let Some(id) = model.tabs().get(index).map(|tab| tab.id()) else {
@@ -630,6 +685,9 @@ fn apply_tab_action(model: &mut TabModel, action: ShellAction) -> Result<(), Win
                 return Ok(());
             };
             model.close_tab(id);
+        }
+        ShellAction::SubmitAddress(text) => {
+            model.submit_address(&text).map_err(WindowError::Content)?;
         }
     }
 
@@ -690,13 +748,36 @@ fn shell_frame(
     )
 }
 
-/// Converts the producer's placed-run view into the neutral shell label view.
+/// Composes the neutral label view from the producer view and the address state.
 ///
-/// Both views carry the same neutral geometry, one placed glyph run per chrome
-/// region, so this only re-owns the runs for the shell. It names no locale type,
-/// so the window stays free of the localization crate.
-fn chrome_label_view(view: &ChromeTextView) -> LabelView {
-    LabelView::new(view.runs().to_vec())
+/// It keeps every non-address run from the producer view unchanged and selects the
+/// address run: the catalogue placeholder run when the edit buffer is empty and the
+/// field is unfocused, else the live run shaped against the pre-packed chrome atlas
+/// (D5, D7, D9). It never rebuilds the atlas, so shaping stays cheap per event.
+fn compose_labels(
+    chrome_text: &ChromeText,
+    address_text: &str,
+    address_focused: bool,
+) -> Result<LabelView, WindowError> {
+    let show_placeholder = address_text.is_empty() && !address_focused;
+
+    let view = chrome_text.view();
+    let mut runs = Vec::with_capacity(view.runs().len());
+    for (region, run) in view.runs() {
+        if *region == ShellRegion::AddressField && !show_placeholder {
+            continue;
+        }
+        runs.push((*region, run.clone()));
+    }
+
+    if !show_placeholder {
+        let live = chrome_text
+            .shape_address(address_text)
+            .map_err(WindowError::ChromeText)?;
+        runs.push((ShellRegion::AddressField, live));
+    }
+
+    Ok(LabelView::new(runs))
 }
 
 /// Derives the viewport geometry for one render from the viewport rectangle.
@@ -727,15 +808,41 @@ fn to_pointer_position(position: PhysicalPosition<f64>) -> PointerPosition {
     PointerPosition::new(position.x as f32, position.y as f32)
 }
 
-/// Converts a native physical key into the neutral shell key value.
+/// Converts a native key event into the neutral shell key, if it carries one.
 ///
-/// The shell carries a key as an uninterpreted `u32` (D3). The physical key is a
-/// stable identity for a key position, so its hash gives a neutral value the shell
-/// forwards without interpreting it at M1.
-fn to_key_input(physical_key: PhysicalKey) -> KeyInput {
-    let mut hasher = DefaultHasher::new();
-    physical_key.hash(&mut hasher);
-    KeyInput::new(hasher.finish() as u32)
+/// The window reads the typed text (layout and shift aware) and the named edit
+/// keys, never the physical key position (D2). It returns `None` for a key the
+/// address field does not consume, so only a real character or an edit key reaches
+/// the shell.
+fn to_key_input(event: &KeyEvent) -> Option<KeyInput> {
+    key_input_from(&event.logical_key, event.text.as_deref())
+}
+
+/// Maps a logical key and its typed text to the neutral shell key.
+///
+/// The three edit keys map from the named key, so they win over any control text
+/// they also report. Every other key maps from a single typed character, so a
+/// layout- and shift-aware character (including space) is forwarded. A
+/// multi-character text value (an IME composition signal) is not forwarded (D2),
+/// and a key with no usable text (an arrow or a modifier) yields `None`.
+fn key_input_from(logical_key: &Key, text: Option<&str>) -> Option<KeyInput> {
+    if let Key::Named(named) = logical_key {
+        match named {
+            NamedKey::Backspace => return Some(KeyInput::Backspace),
+            NamedKey::Enter => return Some(KeyInput::Enter),
+            NamedKey::Escape => return Some(KeyInput::Escape),
+            _ => {}
+        }
+    }
+
+    let text = text?;
+    let mut characters = text.chars();
+    let first = characters.next()?;
+    if characters.next().is_some() {
+        return None;
+    }
+
+    Some(KeyInput::Character(first))
 }
 
 /// Validates a window size into a nonzero, in-bounds surface extent.
@@ -772,6 +879,15 @@ fn ensure_handles(window: &Window) -> Result<(), WindowError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use locale::Locale;
+    use panther_localization::{ActiveLocaleState, LocaleRequest, LocaleResolver, MessageCatalog};
+
+    fn chrome_text() -> ChromeText {
+        let english = Locale::parse("en").expect("valid identifier");
+        let resolver = LocaleResolver::new(vec![english.clone()], vec![english]);
+        let state = ActiveLocaleState::new(resolver, LocaleRequest::new());
+        ChromeText::new(state, MessageCatalog::load()).expect("the producer builds")
+    }
 
     fn active_id(model: &TabModel) -> Option<u64> {
         model
@@ -811,7 +927,7 @@ mod tests {
         model.open_tab();
         model.open_tab();
 
-        apply_tab_action(&mut model, ShellAction::ActivateTab(0)).expect("activate applies");
+        apply_shell_action(&mut model, ShellAction::ActivateTab(0)).expect("activate applies");
 
         assert_eq!(model.active_tab(), Some(first));
     }
@@ -821,7 +937,8 @@ mod tests {
         let mut model = TabModel::new();
         let only = model.open_tab();
 
-        apply_tab_action(&mut model, ShellAction::ActivateTab(5)).expect("out-of-range is a no-op");
+        apply_shell_action(&mut model, ShellAction::ActivateTab(5))
+            .expect("out-of-range is a no-op");
 
         assert_eq!(model.active_tab(), Some(only));
         assert_eq!(model.tabs().len(), 1);
@@ -832,11 +949,11 @@ mod tests {
         let mut model = TabModel::new();
 
         for _ in 0..MAX_TABS {
-            apply_tab_action(&mut model, ShellAction::NewTab).expect("new tab applies");
+            apply_shell_action(&mut model, ShellAction::NewTab).expect("new tab applies");
         }
         assert_eq!(model.tabs().len(), MAX_TABS);
 
-        apply_tab_action(&mut model, ShellAction::NewTab).expect("new tab at the bound applies");
+        apply_shell_action(&mut model, ShellAction::NewTab).expect("new tab at the bound applies");
         assert_eq!(model.tabs().len(), MAX_TABS);
     }
 
@@ -848,13 +965,13 @@ mod tests {
         let third = model.open_tab();
         model.activate(second).expect("activate succeeds");
 
-        apply_tab_action(&mut model, ShellAction::CloseTab(1)).expect("close applies");
+        apply_shell_action(&mut model, ShellAction::CloseTab(1)).expect("close applies");
         assert_eq!(model.active_tab(), Some(third));
 
-        apply_tab_action(&mut model, ShellAction::CloseTab(1)).expect("close applies");
+        apply_shell_action(&mut model, ShellAction::CloseTab(1)).expect("close applies");
         assert_eq!(model.active_tab(), Some(first));
 
-        apply_tab_action(&mut model, ShellAction::CloseTab(0)).expect("close applies");
+        apply_shell_action(&mut model, ShellAction::CloseTab(0)).expect("close applies");
         assert_eq!(model.active_tab(), None);
     }
 
@@ -863,9 +980,107 @@ mod tests {
         let mut model = TabModel::new();
         model.open_tab();
 
-        apply_tab_action(&mut model, ShellAction::CloseTab(9)).expect("out-of-range is a no-op");
+        apply_shell_action(&mut model, ShellAction::CloseTab(9)).expect("out-of-range is a no-op");
 
         assert_eq!(model.tabs().len(), 1);
         assert_eq!(active_id(&model), Some(0));
+    }
+
+    #[test]
+    fn key_input_maps_a_single_typed_character() {
+        let input = key_input_from(&Key::Character("a".into()), Some("a"));
+
+        assert_eq!(input, Some(KeyInput::Character('a')));
+    }
+
+    #[test]
+    fn key_input_maps_the_three_named_edit_keys() {
+        assert_eq!(
+            key_input_from(&Key::Named(NamedKey::Backspace), Some("\u{8}")),
+            Some(KeyInput::Backspace)
+        );
+        assert_eq!(
+            key_input_from(&Key::Named(NamedKey::Enter), Some("\r")),
+            Some(KeyInput::Enter)
+        );
+        assert_eq!(
+            key_input_from(&Key::Named(NamedKey::Escape), None),
+            Some(KeyInput::Escape)
+        );
+    }
+
+    #[test]
+    fn key_input_does_not_forward_a_multi_character_text_value() {
+        let input = key_input_from(&Key::Character("ab".into()), Some("ab"));
+
+        assert_eq!(input, None);
+    }
+
+    #[test]
+    fn submit_address_action_attaches_the_fixture_and_commits_the_address() {
+        let mut model = TabModel::new();
+        model.open_tab();
+
+        apply_shell_action(
+            &mut model,
+            ShellAction::SubmitAddress("panther:demo".to_owned()),
+        )
+        .expect("submit applies");
+
+        assert_eq!(model.active_address_text(), Some("panther:demo"));
+    }
+
+    #[test]
+    fn a_rejected_submit_action_leaves_the_committed_address_unchanged() {
+        let mut model = TabModel::new();
+        model.open_tab();
+
+        apply_shell_action(
+            &mut model,
+            ShellAction::SubmitAddress("https://example.com".to_owned()),
+        )
+        .expect("submit applies");
+
+        assert_eq!(model.active_address_text(), None);
+    }
+
+    const NAVIGATION_REGIONS: [ShellRegion; 3] = [
+        ShellRegion::NavigationBack,
+        ShellRegion::NavigationForward,
+        ShellRegion::NavigationReload,
+    ];
+
+    #[test]
+    fn an_empty_unfocused_address_composes_the_catalogue_placeholder_run() {
+        let chrome = chrome_text();
+
+        let labels = compose_labels(&chrome, "", false).expect("the labels compose");
+
+        let placeholder = chrome
+            .view()
+            .run(ShellRegion::AddressField)
+            .expect("the catalogue placeholder run");
+        assert_eq!(labels.run(ShellRegion::AddressField), Some(placeholder));
+        for region in NAVIGATION_REGIONS {
+            assert_eq!(labels.run(region), chrome.view().run(region));
+        }
+    }
+
+    #[test]
+    fn a_non_empty_buffer_composes_the_live_run() {
+        let chrome = chrome_text();
+
+        let labels = compose_labels(&chrome, "panther:demo", true).expect("the labels compose");
+
+        let live = chrome.shape_address("panther:demo").expect("the live run");
+        assert_eq!(labels.run(ShellRegion::AddressField), Some(&live));
+        let placeholder = chrome
+            .view()
+            .run(ShellRegion::AddressField)
+            .expect("the catalogue placeholder run");
+        assert_ne!(labels.run(ShellRegion::AddressField), Some(placeholder));
+        for region in NAVIGATION_REGIONS {
+            assert_eq!(labels.run(region), chrome.view().run(region));
+        }
     }
 }
