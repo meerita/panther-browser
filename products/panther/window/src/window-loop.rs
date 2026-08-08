@@ -34,7 +34,8 @@ use std::time::{Duration, Instant};
 use panther_browser::TabModel;
 use panther_chrome_text::{ChromeRefresh, ChromeText};
 use panther_shell::{
-    KeyInput, LabelView, PointerPosition, Shell, ShellAction, ShellRegion, TabStripView,
+    KeyInput, LabelView, PointerPosition, ScaleFactor, Shell, ShellAction, ShellRegion,
+    TabStripView,
 };
 use purr_embedding::{DocumentFrame, ViewportGeometry};
 use purr_graphics::{
@@ -137,11 +138,19 @@ pub fn run_window(tab_model: TabModel, chrome_text: ChromeText) -> Result<(), Wi
 /// catalog and the active locale, so the window never names the localization
 /// crate. The chrome atlas realizes through the same identity-keyed texture cache
 /// as the document atlas, so their distinct identities never alias.
+///
+/// The window holds the display scale factor. It keeps `extent` in physical
+/// surface pixels for the backend and the NDC math, and hands the shell a logical
+/// extent, so the chrome lays out in logical pixels and paints at physical
+/// resolution. The document renders at physical resolution with the scale as its
+/// device pixel ratio (D4). The scale is a render-side detail only; it never
+/// reaches web content (I4).
 struct Presentation {
     window: Rc<Window>,
     backend: ActiveBackend,
     surface: SurfaceIdentity,
     extent: Extent2d,
+    scale: ScaleFactor,
     shell: Shell,
     last_cursor: Option<PointerPosition>,
     tab_model: TabModel,
@@ -196,7 +205,36 @@ impl Presentation {
             .resize_presentation_target(self.surface, extent)
             .map_err(WindowError::Backend)?;
         self.extent = extent;
-        self.shell.resize(extent);
+        self.shell.resize(self.scale.to_logical_extent(extent));
+        self.produce_document()?;
+        self.window.request_redraw();
+        Ok(())
+    }
+
+    /// Applies a runtime display-scale change (a monitor move) without a restart.
+    ///
+    /// A `ScaleFactorChanged` event carries the new scale; the physical surface
+    /// extent is unchanged by this event alone (winit pairs it with a `Resized`
+    /// when the surface size also changes). Only a real change does work: it stores
+    /// the new scale, relays it to the shell and the chrome producer, recomputes the
+    /// logical extent from the current physical extent, re-produces the document at
+    /// the new resolution, and requests a redraw. The chrome producer rebuilds the
+    /// atlas at the new physical size on the real change (S1: never per frame), so
+    /// the placed runs are re-pushed to the shell to name the fresh atlas identity
+    /// the next realize allocates. It fails closed with the producer error.
+    fn apply_scale_change(&mut self, scale_factor: f64) -> Result<(), WindowError> {
+        let scale = ScaleFactor::from_winit(scale_factor);
+        if scale == self.scale {
+            return Ok(());
+        }
+
+        self.scale = scale;
+        self.shell.set_scale(scale);
+        self.chrome_text
+            .set_scale(scale)
+            .map_err(WindowError::ChromeText)?;
+        self.refresh_address_labels()?;
+        self.shell.resize(self.scale.to_logical_extent(self.extent));
         self.produce_document()?;
         self.window.request_redraw();
         Ok(())
@@ -211,7 +249,7 @@ impl Presentation {
     /// frame. Runs on initialize and on resize only, never per continuous frame
     /// (S1).
     fn produce_document(&mut self) -> Result<(), WindowError> {
-        let Some(geometry) = viewport_geometry(self.viewport_rect()) else {
+        let Some(geometry) = viewport_geometry(self.physical_viewport_rect(), self.scale) else {
             return Ok(());
         };
 
@@ -230,7 +268,7 @@ impl Presentation {
     fn composite_content(&self) -> Option<CompositedDocument> {
         let frame = self.document_frame.as_ref()?;
         let generation = self.tab_model.active_generation()?;
-        composite_document(frame, self.viewport_rect(), generation)
+        composite_document(frame, self.physical_viewport_rect(), generation)
     }
 
     /// Realizes the document uploads on the backend and remaps their identities.
@@ -365,14 +403,19 @@ impl Presentation {
         })
     }
 
-    /// Current viewport rectangle in surface pixel space.
-    fn viewport_rect(&self) -> Rect {
-        self.shell.layout().rect(ShellRegion::Viewport)
+    /// Current viewport rectangle in physical surface pixels.
+    ///
+    /// The shell lays out the viewport in logical pixels; the document renders and
+    /// composites at physical resolution, so the content extent and the compositor
+    /// use the rectangle scaled by the active display scale.
+    fn physical_viewport_rect(&self) -> Rect {
+        self.scale
+            .scale_rect(self.shell.layout().rect(ShellRegion::Viewport))
     }
 
     /// Forwards a pointer move to the shell and redraws only on a state change.
     fn pointer_moved(&mut self, position: PhysicalPosition<f64>) {
-        let position = to_pointer_position(position);
+        let position = to_pointer_position(position, self.scale);
         self.last_cursor = Some(position);
         self.shell.pointer_moved(position);
         self.request_redraw_if_dirty();
@@ -507,7 +550,7 @@ impl WindowApplication {
         &mut self,
         event_loop: &ActiveEventLoop,
         tab_model: TabModel,
-        chrome_text: ChromeText,
+        mut chrome_text: ChromeText,
     ) -> Result<(), WindowError> {
         let attributes = Window::default_attributes()
             .with_title(WINDOW_TITLE)
@@ -521,6 +564,7 @@ impl WindowApplication {
         ensure_handles(&window)?;
 
         let extent = valid_extent(window.inner_size()).ok_or(WindowError::InvalidSurfaceExtent)?;
+        let scale = ScaleFactor::from_winit(window.scale_factor());
 
         let mut backend = create_active_backend()?;
         let descriptor = PresentationTargetDescriptor {
@@ -536,12 +580,19 @@ impl WindowApplication {
 
         window.request_redraw();
 
+        // Drive the injected chrome producer at the real display scale before the
+        // first realize, so the atlas rasterizes at the physical size (D2).
+        chrome_text
+            .set_scale(scale)
+            .map_err(WindowError::ChromeText)?;
+
         let mut presentation = Presentation {
             window,
             backend,
             surface,
             extent,
-            shell: Shell::new(extent),
+            scale,
+            shell: Shell::new(scale.to_logical_extent(extent), scale),
             last_cursor: None,
             tab_model,
             chrome_text,
@@ -601,6 +652,12 @@ impl ApplicationHandler for WindowApplication {
             }
             WindowEvent::Resized(size) => {
                 if let Err(error) = presentation.resize(size) {
+                    self.error = Some(error);
+                    event_loop.exit();
+                }
+            }
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                if let Err(error) = presentation.apply_scale_change(scale_factor) {
                     self.error = Some(error);
                     event_loop.exit();
                 }
@@ -780,15 +837,18 @@ fn compose_labels(
     Ok(LabelView::new(runs))
 }
 
-/// Derives the viewport geometry for one render from the viewport rectangle.
+/// Derives the viewport geometry for one render from the physical viewport
+/// rectangle and the display scale.
 ///
-/// The content extent is the rounded viewport size in surface pixels; the device
-/// pixel ratio is 1.0 on the M2 path. A rectangle that rounds to a zero width or
-/// height has no content box and yields `None`, so the caller keeps the last
-/// produced frame instead of producing an empty one.
-fn viewport_geometry(viewport: Rect) -> Option<ViewportGeometry> {
-    let width = viewport.width.round();
-    let height = viewport.height.round();
+/// The content extent is the rounded physical viewport size, so the document
+/// renders at physical resolution; the device pixel ratio is the display scale, so
+/// the engine sizes content correctly for the density (D4). A rectangle that rounds
+/// to a zero width or height has no content box and yields `None`, so the caller
+/// keeps the last produced frame instead of producing an empty one. The scale is a
+/// render-side value only; it is never exposed to web content (I4).
+fn viewport_geometry(physical_viewport: Rect, scale: ScaleFactor) -> Option<ViewportGeometry> {
+    let width = physical_viewport.width.round();
+    let height = physical_viewport.height.round();
 
     if width < 1.0 || height < 1.0 {
         return None;
@@ -796,16 +856,19 @@ fn viewport_geometry(viewport: Rect) -> Option<ViewportGeometry> {
 
     Some(ViewportGeometry {
         content_extent: Extent2d::new(width as u32, height as u32),
-        device_pixel_ratio: 1.0,
+        device_pixel_ratio: scale.get(),
     })
 }
 
-/// Converts a native pointer position into the neutral shell pointer position.
+/// Converts a native physical pointer position into the neutral shell position.
 ///
-/// The shell works in surface pixel space and names no windowing type, so the
-/// native `f64` position is narrowed to the shell `f32` value at this seam.
-fn to_pointer_position(position: PhysicalPosition<f64>) -> PointerPosition {
-    PointerPosition::new(position.x as f32, position.y as f32)
+/// The shell works in logical pixel space and names no windowing type, so the
+/// native physical `f64` position divides by the display scale and narrows to the
+/// shell `f32` value at this seam. The scale is validated in a bounded positive
+/// range, so the divisor is never zero.
+fn to_pointer_position(position: PhysicalPosition<f64>, scale: ScaleFactor) -> PointerPosition {
+    let factor = scale.get();
+    PointerPosition::new(position.x as f32 / factor, position.y as f32 / factor)
 }
 
 /// Converts a native key event into the neutral shell key, if it carries one.
@@ -886,7 +949,33 @@ mod tests {
         let english = Locale::parse("en").expect("valid identifier");
         let resolver = LocaleResolver::new(vec![english.clone()], vec![english]);
         let state = ActiveLocaleState::new(resolver, LocaleRequest::new());
-        ChromeText::new(state, MessageCatalog::load()).expect("the producer builds")
+        ChromeText::new(state, MessageCatalog::load(), ScaleFactor::ONE)
+            .expect("the producer builds")
+    }
+
+    #[test]
+    fn viewport_geometry_uses_the_scale_as_the_device_pixel_ratio() {
+        let scale = ScaleFactor::from_winit(2.0);
+        let physical = scale.scale_rect(Rect::new(0.0, 40.0, 400.0, 300.0));
+
+        let geometry = viewport_geometry(physical, scale).expect("a non-degenerate viewport");
+
+        assert_eq!(geometry.device_pixel_ratio, 2.0);
+        assert_eq!(geometry.content_extent, Extent2d::new(800, 600));
+    }
+
+    #[test]
+    fn viewport_geometry_rejects_a_degenerate_rectangle() {
+        assert!(viewport_geometry(Rect::new(0.0, 0.0, 0.0, 300.0), ScaleFactor::ONE).is_none());
+    }
+
+    #[test]
+    fn pointer_position_converts_physical_to_logical() {
+        let scale = ScaleFactor::from_winit(2.0);
+
+        let logical = to_pointer_position(PhysicalPosition::new(200.0, 80.0), scale);
+
+        assert_eq!(logical, PointerPosition::new(100.0, 40.0));
     }
 
     fn active_id(model: &TabModel) -> Option<u64> {

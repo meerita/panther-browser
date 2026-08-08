@@ -60,12 +60,14 @@ pub(crate) struct StripLayout {
 
 /// Places the slots, their close sub-rects, and the new-tab button in the band.
 ///
-/// The new-tab button is a square at the band right, its width equal to the band
-/// height. The slots fill the area left of the button, each a fraction of that
-/// area clamped to a minimum and maximum width. A slot that would start beyond
-/// the slot area is omitted, so overflow is clipped rather than scrolled (D8).
-/// Each close sub-rect is a small square inset at its slot right edge and
-/// vertically centered (D7). The work is linear in the bounded tab count.
+/// The band and the fixed size constants are logical; the paint seam scales the
+/// placed rectangles to physical pixels. The new-tab button is a square at the
+/// band right, its width equal to the band height. The slots fill the area left
+/// of the button, each a fraction of that area clamped to a minimum and maximum
+/// width. A slot that would start beyond the slot area is omitted, so overflow is
+/// clipped rather than scrolled (D8). Each close sub-rect is a small square inset
+/// at its slot right edge and vertically centered (D7). The work is linear in the
+/// bounded tab count.
 pub(crate) fn strip_layout(band: Rect, tab_count: usize) -> StripLayout {
     let button_width = band.height;
     let new_tab = Rect::new(
