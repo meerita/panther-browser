@@ -48,6 +48,13 @@ use purr_text::{
 /// The opaque white document background painted behind all content.
 const CANVAS_BACKGROUND: Color = Color::new(1.0, 1.0, 1.0, 1.0);
 
+/// The initial document text color, matching the user-agent `color` of `#000000`.
+///
+/// It seeds the inherited text color at the document root; a box that resolves its
+/// own `color` overrides it for its subtree, and an anonymous box keeps the
+/// inherited value.
+const DEFAULT_TEXT_COLOR: Color = Color::new(0.0, 0.0, 0.0, 1.0);
+
 /// The owned, immutable result of lowering one fragment tree.
 ///
 /// The commands paint the frame in order, and the uploads carry the single glyph
@@ -109,6 +116,7 @@ pub fn paint_document(
             &atlas,
             &lookup,
             device_pixel_ratio,
+            DEFAULT_TEXT_COLOR,
             &mut commands,
         );
     }
@@ -151,12 +159,18 @@ fn collect_slice_keys(slice: &GlyphRunSlice, dpr: f32, keys: &mut Vec<GlyphKey>)
 }
 
 /// Paints one box fragment: its background, then its contents, in paint order.
+///
+/// `text_color` is the inherited text color reaching this box. A box that resolves
+/// its own `color` overrides it for its subtree; an anonymous box (no node) keeps
+/// the inherited value, so text color inherits across anonymous boxes.
+#[allow(clippy::too_many_arguments)]
 fn paint_box(
     box_fragment: &BoxFragment,
     styles: &StyleTree,
     atlas: &GlyphAtlas,
     lookup: &HashMap<GlyphKey, GlyphPlacement>,
     dpr: f32,
+    text_color: Color,
     commands: &mut Vec<DrawCommand>,
 ) {
     push_background(
@@ -167,27 +181,31 @@ fn paint_box(
         commands,
     );
 
+    let text_color = resolve_text_color(box_fragment.node(), styles).unwrap_or(text_color);
+
     match box_fragment.contents() {
         BoxContents::Blocks(children) => {
             for child in children {
-                paint_box(child, styles, atlas, lookup, dpr, commands);
+                paint_box(child, styles, atlas, lookup, dpr, text_color, commands);
             }
         }
         BoxContents::Lines(lines) => {
             for line in lines {
-                paint_line(line, styles, atlas, lookup, dpr, commands);
+                paint_line(line, styles, atlas, lookup, dpr, text_color, commands);
             }
         }
     }
 }
 
 /// Paints one line: inline-box backgrounds first, then the glyph quads over them.
+#[allow(clippy::too_many_arguments)]
 fn paint_line(
     line: &LineFragment,
     styles: &StyleTree,
     atlas: &GlyphAtlas,
     lookup: &HashMap<GlyphKey, GlyphPlacement>,
     dpr: f32,
+    text_color: Color,
     commands: &mut Vec<DrawCommand>,
 ) {
     let baseline = line
@@ -210,6 +228,7 @@ fn paint_line(
                     atlas,
                     lookup,
                     dpr,
+                    text_color,
                     commands,
                 );
             }
@@ -230,6 +249,7 @@ fn paint_text(
     atlas: &GlyphAtlas,
     lookup: &HashMap<GlyphKey, GlyphPlacement>,
     dpr: f32,
+    text_color: Color,
     commands: &mut Vec<DrawCommand>,
 ) {
     let size = to_text_unit(device_size(to_layout_unit(slice.size()), dpr));
@@ -251,11 +271,23 @@ fn paint_text(
                         source.width as f32,
                         source.height as f32,
                     ),
+                    color: text_color,
                 });
             }
         }
         pen = pen.saturating_add(to_layout_unit(glyph.advance()));
     }
+}
+
+/// Resolves the text color of a box from its computed `color`, or `None` when the
+/// box has no node or the value does not parse.
+///
+/// The computed `color` inherits and has an initial value, so a real element
+/// resolves a color; an anonymous box (no node) returns `None` so the caller keeps
+/// the inherited color.
+fn resolve_text_color(node: Option<NodeId>, styles: &StyleTree) -> Option<Color> {
+    node.and_then(|node| styles.get(node))
+        .and_then(|style| parse_color(style.get(PropertyId::Color)))
 }
 
 /// Pushes a background fill for a node whose style resolves an opaque color.
@@ -515,6 +547,47 @@ mod tests {
             assert!(source.x + source.width <= extent.width as f32);
             assert!(source.y + source.height <= extent.height as f32);
         }
+    }
+
+    fn quad_colors(output: &PaintOutput) -> Vec<Color> {
+        output
+            .commands
+            .iter()
+            .filter_map(|command| match command {
+                DrawCommand::TexturedQuad { color, .. } => Some(*color),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn glyph_quads_carry_the_resolved_text_color() {
+        let (dom, _card) = card_dom();
+        let author = ".card { width: 200px; height: 50px; margin: 0; padding: 0; \
+             background-color: #eef; color: #ff0000; line-height: 20px; }";
+        let output = paint(&dom, author, Extent2d::new(800, 600), 1.0);
+
+        let colors = quad_colors(&output);
+        assert!(!colors.is_empty());
+        assert!(
+            colors
+                .iter()
+                .all(|color| *color == Color::new(1.0, 0.0, 0.0, 1.0))
+        );
+    }
+
+    #[test]
+    fn glyph_quads_default_to_black_text_when_no_color_is_set() {
+        let (dom, _card) = card_dom();
+        let output = paint(&dom, author(), Extent2d::new(800, 600), 1.0);
+
+        let colors = quad_colors(&output);
+        assert!(!colors.is_empty());
+        assert!(
+            colors
+                .iter()
+                .all(|color| *color == Color::new(0.0, 0.0, 0.0, 1.0))
+        );
     }
 
     #[test]

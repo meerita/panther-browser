@@ -17,7 +17,7 @@
 //! bounds, or an upload whose pixel buffer does not match its descriptor, is
 //! rejected by `FrameSubmission::validate` before any backend consumes it.
 
-use crate::descriptor::{PresentationTargetDescriptor, TextureDescriptor, TextureFormatClass};
+use crate::descriptor::{PresentationTargetDescriptor, TextureDescriptor};
 use crate::graphics_error::GraphicsError;
 use crate::identity::{FrameToken, GpuResourceIdentity, SceneIdentity};
 
@@ -59,9 +59,11 @@ impl Rect {
 /// Fixed M0 draw command set.
 ///
 /// The set is closed and small. `Clear` fills the target with one color.
-/// `FillRect` paints a solid-color rectangle. `TexturedQuad` samples a source
-/// region of a texture over a destination rectangle. A new command requires an
-/// interface change.
+/// `FillRect` paints a solid-color rectangle. `TexturedQuad` samples a coverage
+/// mask over a destination rectangle and colorizes it with `color`: the source
+/// texture supplies per-texel coverage and the color supplies the visible color,
+/// so one atlas serves every text color. A new command requires an interface
+/// change.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DrawCommand {
     Clear {
@@ -75,6 +77,7 @@ pub enum DrawCommand {
         rect: Rect,
         texture: GpuResourceIdentity,
         source: Rect,
+        color: crate::descriptor::Color,
     },
 }
 
@@ -138,18 +141,6 @@ impl FrameSubmission {
     }
 }
 
-/// Bytes one texel occupies for a format class.
-///
-/// The M0 format set is closed and every class is four bytes. The exhaustive
-/// match forces a review when a new format class is added.
-fn bytes_per_texel(format: TextureFormatClass) -> u64 {
-    match format {
-        TextureFormatClass::Rgba8Unorm
-        | TextureFormatClass::Bgra8Unorm
-        | TextureFormatClass::Rgba8UnormSrgb => 4,
-    }
-}
-
 /// Expected tightly packed pixel buffer length for a descriptor.
 ///
 /// Returns `None` when the width times height times bytes-per-texel product
@@ -159,7 +150,7 @@ fn bytes_per_texel(format: TextureFormatClass) -> u64 {
 fn expected_pixel_length(descriptor: &TextureDescriptor) -> Option<u64> {
     let width = u64::from(descriptor.extent.width);
     let height = u64::from(descriptor.extent.height);
-    let bytes = bytes_per_texel(descriptor.format);
+    let bytes = u64::from(descriptor.format.bytes_per_texel());
 
     width.checked_mul(height)?.checked_mul(bytes)
 }
@@ -246,6 +237,7 @@ mod tests {
                 rect: Rect::new(0.0, 0.0, 2.0, 2.0),
                 texture: texture_identity(),
                 source: Rect::new(0.0, 0.0, 2.0, 2.0),
+                color: Color::new(0.0, 0.0, 0.0, 1.0),
             },
         ];
 

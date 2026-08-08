@@ -113,6 +113,7 @@ fn offset_and_clip(command: DrawCommand, viewport: Rect) -> Option<DrawCommand> 
             rect,
             texture,
             source,
+            color,
         } => {
             let placed = offset(rect, viewport);
             let clipped = intersect(placed, viewport)?;
@@ -121,6 +122,7 @@ fn offset_and_clip(command: DrawCommand, viewport: Rect) -> Option<DrawCommand> 
                 rect: clipped,
                 texture,
                 source,
+                color,
             })
         }
     }
@@ -368,6 +370,7 @@ mod tests {
                         rect: quad_rect,
                         texture: texture(),
                         source: Rect::new(0.0, 0.0, 2.0, 2.0),
+                        color: CONTENT_COLOR,
                     },
                 ],
             ),
@@ -425,6 +428,7 @@ mod tests {
                     rect: quad_rect,
                     texture: texture(),
                     source: Rect::new(0.0, 0.0, 8.0, 4.0),
+                    color: CONTENT_COLOR,
                 }],
             ),
             viewport(),
