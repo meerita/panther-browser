@@ -32,6 +32,8 @@ mod labels;
 mod pointer_hit_test;
 #[path = "region-layout.rs"]
 mod region_layout;
+#[path = "scale-factor.rs"]
+mod scale_factor;
 #[path = "shell.rs"]
 mod shell;
 #[path = "shell-action.rs"]
@@ -46,6 +48,7 @@ pub use draw_command_builder::build_commands;
 pub use labels::LabelView;
 pub use pointer_hit_test::{PointerPosition, hit_test};
 pub use region_layout::{RegionLayout, layout};
+pub use scale_factor::{CHROME_FONT_SIZE, ScaleFactor};
 pub use shell::{
     ADDRESS_INPUT_MAX_CHARS, KeyInput, Shell, address_input_charset, is_address_input_char,
 };
