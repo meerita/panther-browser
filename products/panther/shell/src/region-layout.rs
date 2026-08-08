@@ -20,10 +20,10 @@ const NAVIGATION_CONTROL_COUNT: f32 = 3.0;
 
 /// Placed rectangle for every shell region in one window extent.
 ///
-/// The layout works in surface pixel space. It is computed once per extent and
-/// read many times by the hit-test and the draw builder. All placement uses
-/// fractions of the extent, so every rectangle stays in bounds for any extent,
-/// including a degenerate one.
+/// The layout works in logical pixel space; the paint seam scales to physical
+/// pixels. It is computed once per extent and read many times by the hit-test and
+/// the draw builder. All placement uses fractions of the extent, so every
+/// rectangle stays in bounds for any extent, including a degenerate one.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RegionLayout {
     extent: Extent2d,
@@ -42,7 +42,7 @@ impl RegionLayout {
         self.extent
     }
 
-    /// Rectangle for one region in surface pixel space.
+    /// Rectangle for one region in logical pixel space.
     pub fn rect(&self, region: ShellRegion) -> Rect {
         match region {
             ShellRegion::TopBar => self.top_bar,

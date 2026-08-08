@@ -8,6 +8,7 @@ use crate::draw_command_builder::build_commands;
 use crate::labels::LabelView;
 use crate::pointer_hit_test::{PointerPosition, hit_test};
 use crate::region_layout::{RegionLayout, layout};
+use crate::scale_factor::ScaleFactor;
 use crate::shell_action::ShellAction;
 use crate::shell_region::ShellRegion;
 use crate::tab_strip::{TabStripView, resolve, strip_layout};
@@ -61,14 +62,17 @@ pub fn address_input_charset() -> impl Iterator<Item = char> {
 
 /// Interaction state and input router for the minimal shell.
 ///
-/// The shell owns the current extent, the cached layout, the hovered and focused
-/// regions, and a dirty flag. It works in surface pixel space. The window seam
-/// forwards extents, pointer positions, and key events; the shell never names a
+/// The shell owns the current logical extent, the cached logical layout, the
+/// active display scale, the hovered and focused regions, and a dirty flag. It
+/// lays out entirely in logical pixels; the paint seam converts to physical
+/// pixels by multiplying through the scale. The window seam forwards logical
+/// extents, logical pointer positions, and key events; the shell never names a
 /// windowing type. To keep on-demand redraw correct (D5), the shell marks itself
 /// dirty only on an actual state change.
 pub struct Shell {
     extent: Extent2d,
     layout: RegionLayout,
+    scale: ScaleFactor,
     tabs: TabStripView,
     labels: LabelView,
     hovered: Option<ShellRegion>,
@@ -82,11 +86,12 @@ pub struct Shell {
 }
 
 impl Shell {
-    /// Builds a shell for one extent and requests the initial paint.
-    pub fn new(extent: Extent2d) -> Self {
+    /// Builds a shell for one logical extent and scale and requests the initial paint.
+    pub fn new(extent: Extent2d, scale: ScaleFactor) -> Self {
         Self {
             extent,
             layout: layout(extent),
+            scale,
             tabs: TabStripView::default(),
             labels: LabelView::default(),
             hovered: None,
@@ -97,11 +102,23 @@ impl Shell {
         }
     }
 
-    /// Recomputes the layout for a new extent and requests a repaint.
+    /// Recomputes the layout for a new logical extent and requests a repaint.
     pub fn resize(&mut self, extent: Extent2d) {
         self.extent = extent;
         self.layout = layout(extent);
         self.dirty = true;
+    }
+
+    /// Replaces the active display scale and requests a repaint on a real change.
+    ///
+    /// The layout is logical and does not depend on the scale, so it is not
+    /// recomputed. Only the paint seam reads the scale, so an unchanged scale
+    /// drives no repaint (D5).
+    pub fn set_scale(&mut self, scale: ScaleFactor) {
+        if scale != self.scale {
+            self.scale = scale;
+            self.dirty = true;
+        }
     }
 
     /// Replaces the neutral tab-strip view the window pushed.
@@ -241,12 +258,12 @@ impl Shell {
         self.dirty = false;
     }
 
-    /// Current window extent in surface pixels.
+    /// Current window extent in logical pixels.
     pub fn extent(&self) -> Extent2d {
         self.extent
     }
 
-    /// Cached region layout for the current extent.
+    /// Cached logical region layout for the current extent.
     pub fn layout(&self) -> &RegionLayout {
         &self.layout
     }
@@ -265,7 +282,9 @@ impl Shell {
     ///
     /// The list reflects the current layout, hover, focus, and labels, so the
     /// window paints exactly the state the shell holds (D5). It clears, fills each
-    /// region and the tab strip, then paints the label runs as textured quads.
+    /// region and the tab strip, then paints the label runs as textured quads. The
+    /// layout is logical; the paint seam scales every emitted rectangle to physical
+    /// pixels by the active scale.
     pub fn build_commands(&self) -> Vec<DrawCommand> {
         build_commands(
             &self.layout,
@@ -273,6 +292,7 @@ impl Shell {
             self.focused,
             self.tabs,
             &self.labels,
+            self.scale,
         )
     }
 }
@@ -280,11 +300,12 @@ impl Shell {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scale_factor::CHROME_FONT_SIZE;
     use crate::tab_strip::strip_layout;
     use purr_graphics::Rect;
 
     fn shell() -> Shell {
-        Shell::new(Extent2d::new(1280, 800))
+        Shell::new(Extent2d::new(1280, 800), ScaleFactor::ONE)
     }
 
     fn center(rect: Rect) -> PointerPosition {
@@ -509,6 +530,19 @@ mod tests {
     }
 
     #[test]
+    fn set_scale_marks_dirty_on_a_real_change_only() {
+        let mut shell = shell();
+        shell.clear_dirty();
+
+        shell.set_scale(ScaleFactor::from_winit(2.0));
+        assert!(shell.is_dirty());
+
+        shell.clear_dirty();
+        shell.set_scale(ScaleFactor::from_winit(2.0));
+        assert!(!shell.is_dirty());
+    }
+
+    #[test]
     fn set_tabs_marks_dirty_on_a_changed_view_only() {
         let mut shell = shell();
         shell.clear_dirty();
@@ -525,11 +559,11 @@ mod tests {
     fn set_labels_marks_dirty_on_a_changed_view_only() {
         use purr_text::{
             BundledFont, CmapOneToOneAdapter, GlyphKey, GlyphRunGeneration, GlyphRunId,
-            PlacedGlyphRun, ShapingRequest, TextShapingAdapter, TextUnit, build_glyph_atlas,
+            PlacedGlyphRun, ShapingRequest, TextShapingAdapter, build_glyph_atlas,
         };
 
         let font = BundledFont::load().expect("the bundled font parses");
-        let size = TextUnit::from_px(15).expect("in range");
+        let size = CHROME_FONT_SIZE;
         let run = CmapOneToOneAdapter
             .shape(ShapingRequest {
                 font: &font,

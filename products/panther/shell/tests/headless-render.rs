@@ -20,7 +20,7 @@ use raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, WindowHandle,
 };
 
-use panther_shell::{PointerPosition, Shell, ShellRegion};
+use panther_shell::{PointerPosition, ScaleFactor, Shell, ShellRegion};
 
 /// Fixed target the test paints into.
 ///
@@ -130,7 +130,7 @@ fn shell_commands_render_expected_region_pixels() {
         )
         .expect("target creation succeeds");
 
-    let mut shell = Shell::new(extent());
+    let mut shell = Shell::new(extent(), ScaleFactor::ONE);
     shell.pointer_moved(center(shell.layout().rect(ShellRegion::AddressField)));
     shell.pointer_pressed(center(shell.layout().rect(ShellRegion::Viewport)));
 
