@@ -47,7 +47,7 @@ memory = { path = "foundation/memory" }
 panther-chrome-text = { path = "products/panther/chrome-text" }
 panther-localization = { path = "products/panther/localization" }
 panther-shell = { path = "products/panther/shell" }
-pollster = "0.4"
+pollster = "1.0"
 purr-graphics = { path = "engines/purr/graphics" }
 purr-text = { path = "engines/purr/text" }
 raw-window-handle = { version = "0.6", features = ["alloc"] }
