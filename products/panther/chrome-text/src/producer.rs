@@ -11,6 +11,11 @@
 //! that atlas into a neutral [`PlacedGlyphRun`]. The shell reads the placed runs;
 //! the window uploads the atlas.
 //!
+//! The atlas rasterizes at physical resolution: the canonical logical
+//! [`panther_shell::CHROME_FONT_SIZE`] scales by the active [`ScaleFactor`], so
+//! glyphs stay sharp on a high-density display and the placed runs the shell
+//! paints carry physical geometry.
+//!
 //! The atlas lives in a chrome producer namespace distinct from the engine
 //! namespace, so the chrome atlas identity can never collide with a document
 //! atlas identity. Each rebuild advances the atlas resource generation, so a
@@ -18,30 +23,24 @@
 //!
 //! Building an atlas rasterizes glyphs, so it is not per-frame work. The producer
 //! stamps every built result with the locale generation it was built under and
-//! rebuilds only when the generation advances or the resolved labels change. It
-//! never serves a result stamped with a generation other than the active one.
+//! rebuilds only when the generation advances, the resolved labels change, or the
+//! scale changes. It never serves a result stamped with a generation other than
+//! the active one.
 
 use locale::Locale;
 use panther_localization::{ActiveLocaleState, LocaleGeneration, MessageCatalog};
-use panther_shell::{ShellRegion, address_input_charset};
+use panther_shell::{CHROME_FONT_SIZE, ScaleFactor, ShellRegion, address_input_charset};
 use purr_graphics::{
     DeviceGeneration, GpuResourceIdentity, ProducerNamespace, ResourceGeneration, ResourceId,
     ResourceUpload,
 };
 use purr_text::{
     BundledFont, CmapOneToOneAdapter, FontError, FontMetrics, GlyphAtlas, GlyphAtlasError,
-    GlyphKey, GlyphRun, GlyphRunGeneration, GlyphRunId, ONE_PX_RAW, PlacedGlyphRun, ShapingError,
+    GlyphKey, GlyphRun, GlyphRunGeneration, GlyphRunId, PlacedGlyphRun, ShapingError,
     ShapingRequest, TextShapingAdapter, TextUnit,
 };
 
 use crate::label_set::{ChromeLabels, resolve_labels};
-
-/// The fixed chrome text size, in device pixels.
-///
-/// One size fits the toolbar control height for this iteration; the chrome uses
-/// no other text size, so the atlas packs one mask per glyph. The value is a
-/// raw fixed-point unit, so it needs no fallible construction.
-const CHROME_FONT_SIZE: TextUnit = TextUnit::from_raw(15 * ONE_PX_RAW);
 
 /// The producer namespace for the chrome atlas.
 ///
@@ -145,28 +144,35 @@ pub struct ChromeText {
     font: BundledFont,
     state: ActiveLocaleState,
     catalog: MessageCatalog,
+    scale: ScaleFactor,
     resource_generation: u64,
     build: ChromeBuild,
 }
 
 impl ChromeText {
     /// Loads the bundled font and builds the first chrome atlas at the active
-    /// locale.
+    /// locale and the given display scale.
     ///
-    /// It resolves the four labels, shapes each at the chrome size, packs every
-    /// label glyph into one atlas in the chrome namespace, and combines each run
-    /// with the atlas into a placed run. It fails closed with a typed error when
-    /// the font, shaping, or atlas build fails.
-    pub fn new(state: ActiveLocaleState, catalog: MessageCatalog) -> Result<Self, ChromeTextError> {
+    /// It resolves the four labels, shapes each at the physical chrome size
+    /// (`CHROME_FONT_SIZE * scale`), packs every label glyph into one atlas in the
+    /// chrome namespace, and combines each run with the atlas into a placed run. It
+    /// fails closed with a typed error when the font, shaping, or atlas build
+    /// fails.
+    pub fn new(
+        state: ActiveLocaleState,
+        catalog: MessageCatalog,
+        scale: ScaleFactor,
+    ) -> Result<Self, ChromeTextError> {
         let font = BundledFont::load()?;
         let labels = resolve_labels(&state, &catalog);
         let resource_generation = FIRST_RESOURCE_GENERATION;
-        let build = build_atlas(&font, &labels, resource_generation)?;
+        let build = build_atlas(&font, &labels, physical_size(scale), resource_generation)?;
 
         Ok(Self {
             font,
             state,
             catalog,
+            scale,
             resource_generation,
             build,
         })
@@ -197,7 +203,39 @@ impl ChromeText {
         }
 
         self.resource_generation += 1;
-        self.build = build_atlas(&self.font, &labels, self.resource_generation)?;
+        self.build = build_atlas(
+            &self.font,
+            &labels,
+            physical_size(self.scale),
+            self.resource_generation,
+        )?;
+        Ok(ChromeRefresh::Rebuilt)
+    }
+
+    /// Rebuilds the chrome atlas at a new physical resolution when the display
+    /// scale changed; otherwise keeps the built result.
+    ///
+    /// The layout size stays the logical [`CHROME_FONT_SIZE`]; only the physical
+    /// rasterization size (`CHROME_FONT_SIZE * scale`) changes. When the scale is
+    /// unchanged it returns [`ChromeRefresh::Unchanged`] without shaping. On a real
+    /// change it stores the new scale, advances the resource generation, and builds
+    /// a fresh atlas with a new identity, so the window re-realizes the texture. It
+    /// fails closed with a typed error when the rebuild fails. The rebuild happens
+    /// only on a real scale change, never per frame (S1).
+    pub fn set_scale(&mut self, scale: ScaleFactor) -> Result<ChromeRefresh, ChromeTextError> {
+        if self.scale == scale {
+            return Ok(ChromeRefresh::Unchanged);
+        }
+
+        self.scale = scale;
+        let labels = resolve_labels(&self.state, &self.catalog);
+        self.resource_generation += 1;
+        self.build = build_atlas(
+            &self.font,
+            &labels,
+            physical_size(self.scale),
+            self.resource_generation,
+        )?;
         Ok(ChromeRefresh::Rebuilt)
     }
 
@@ -213,8 +251,9 @@ impl ChromeText {
 
     /// Shapes bounded live address text into a placed run against the chrome atlas.
     ///
-    /// The text shapes at the chrome size with the same adapter as the labels and
-    /// combines with the already-built chrome atlas, so no atlas is rebuilt (D9).
+    /// The text shapes at the physical chrome size with the same adapter as the
+    /// labels and combines with the already-built chrome atlas, so no atlas is
+    /// rebuilt (D9).
     /// The atlas pre-packs the accepted address glyph set, so every accepted
     /// character renders; a character outside that set has no packed glyph and
     /// produces no visible placement (its advance folds into the previous glyph).
@@ -224,7 +263,7 @@ impl ChromeText {
         let run = CmapOneToOneAdapter.shape(ShapingRequest {
             font: &self.font,
             text,
-            size: CHROME_FONT_SIZE,
+            size: physical_size(self.scale),
             run_id: GlyphRunId::new(1),
             generation: GlyphRunGeneration::new(1),
         })?;
@@ -252,16 +291,26 @@ impl ChromeText {
     }
 }
 
+/// The physical rasterization size for a display scale.
+///
+/// The layout size is the logical [`CHROME_FONT_SIZE`]; the atlas rasterizes at
+/// this physical size so glyphs stay sharp on a high-density display. The
+/// conversion is the checked, clamped [`ScaleFactor::scale_text_unit`].
+fn physical_size(scale: ScaleFactor) -> TextUnit {
+    scale.scale_text_unit(CHROME_FONT_SIZE)
+}
+
 /// Shapes every resolved label, packs one atlas, and builds a placed run per
 /// region.
 ///
-/// Every label shapes at the chrome size, so one atlas over the union of the
+/// Every label shapes at the physical size, so one atlas over the union of the
 /// label glyphs serves all runs. The atlas takes the chrome namespace, the chrome
 /// resource id, the given resource generation, and the stable device generation,
 /// so a fresh resource generation yields a fresh identity.
 fn build_atlas(
     font: &BundledFont,
     labels: &ChromeLabels,
+    physical_size: TextUnit,
     resource_generation: u64,
 ) -> Result<ChromeBuild, ChromeTextError> {
     let mut runs: Vec<(ShellRegion, GlyphRun)> = Vec::with_capacity(labels.entries().len());
@@ -269,7 +318,7 @@ fn build_atlas(
         let run = CmapOneToOneAdapter.shape(ShapingRequest {
             font,
             text,
-            size: CHROME_FONT_SIZE,
+            size: physical_size,
             run_id: GlyphRunId::new(index as u32 + 1),
             generation: GlyphRunGeneration::new(1),
         })?;
@@ -279,7 +328,7 @@ fn build_atlas(
     let mut keys: Vec<GlyphKey> = Vec::new();
     for (_, run) in &runs {
         for positioned in run.glyphs() {
-            keys.push(GlyphKey::new(positioned.glyph(), CHROME_FONT_SIZE));
+            keys.push(GlyphKey::new(positioned.glyph(), physical_size));
         }
     }
 
@@ -292,12 +341,12 @@ fn build_atlas(
     let charset_run = CmapOneToOneAdapter.shape(ShapingRequest {
         font,
         text: &charset,
-        size: CHROME_FONT_SIZE,
+        size: physical_size,
         run_id: GlyphRunId::new(labels.entries().len() as u32 + 1),
         generation: GlyphRunGeneration::new(1),
     })?;
     for positioned in charset_run.glyphs() {
-        keys.push(GlyphKey::new(positioned.glyph(), CHROME_FONT_SIZE));
+        keys.push(GlyphKey::new(positioned.glyph(), physical_size));
     }
 
     let atlas = purr_text::build_glyph_atlas(
@@ -309,7 +358,7 @@ fn build_atlas(
         DeviceGeneration::new(CHROME_DEVICE_GENERATION),
     )?;
     let metrics = font
-        .metrics(CHROME_FONT_SIZE)
+        .metrics(physical_size)
         .ok_or(ChromeTextError::Metrics)?;
 
     let view = ChromeTextView {
@@ -339,7 +388,7 @@ fn build_atlas(
 mod tests {
     use locale::Locale;
     use panther_localization::{ActiveLocaleState, LocaleRequest, LocaleResolver, MessageCatalog};
-    use panther_shell::ShellRegion;
+    use panther_shell::{ScaleFactor, ShellRegion};
 
     use super::{CHROME_NAMESPACE, ChromeRefresh, ChromeText};
 
@@ -359,8 +408,12 @@ mod tests {
     }
 
     fn producer() -> ChromeText {
+        producer_at(ScaleFactor::ONE)
+    }
+
+    fn producer_at(scale: ScaleFactor) -> ChromeText {
         let state = ActiveLocaleState::new(resolver(), LocaleRequest::new());
-        ChromeText::new(state, MessageCatalog::load()).expect("the producer builds")
+        ChromeText::new(state, MessageCatalog::load(), scale).expect("the producer builds")
     }
 
     #[test]
@@ -501,5 +554,42 @@ mod tests {
         fallback.refresh().expect("the refresh succeeds");
 
         assert_eq!(fallback.view(), &english_view);
+    }
+
+    #[test]
+    fn a_higher_scale_rasterizes_larger_glyph_masks() {
+        let one = producer_at(ScaleFactor::ONE);
+        let two = producer_at(ScaleFactor::from_winit(2.0));
+
+        // The same glyph packs a larger atlas mask at the higher physical size, so
+        // the source rectangle grows in both dimensions.
+        let one_source = one.shape_address("a").expect("shapes").glyphs()[0].source();
+        let two_source = two.shape_address("a").expect("shapes").glyphs()[0].source();
+
+        assert!(two_source.width > one_source.width);
+        assert!(two_source.height > one_source.height);
+    }
+
+    #[test]
+    fn set_scale_rebuilds_only_on_a_real_change() {
+        let mut producer = producer();
+        let before = producer.identity();
+
+        // The same scale keeps the built atlas and its identity.
+        let unchanged = producer
+            .set_scale(ScaleFactor::ONE)
+            .expect("set_scale with no change succeeds");
+        assert_eq!(unchanged, ChromeRefresh::Unchanged);
+        assert_eq!(producer.identity(), before);
+
+        // A new scale rebuilds the atlas: the resource generation advances and the
+        // identity changes, so the window re-realizes the texture.
+        let rebuilt = producer
+            .set_scale(ScaleFactor::from_winit(2.0))
+            .expect("the rebuild succeeds");
+        assert_eq!(rebuilt, ChromeRefresh::Rebuilt);
+        let after = producer.identity();
+        assert_ne!(after, before);
+        assert!(after.resource_generation().value() > before.resource_generation().value());
     }
 }
