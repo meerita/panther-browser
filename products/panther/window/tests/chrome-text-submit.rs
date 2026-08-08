@@ -22,7 +22,7 @@
 use locale::Locale;
 use panther_chrome_text::ChromeText;
 use panther_localization::{ActiveLocaleState, LocaleRequest, LocaleResolver, MessageCatalog};
-use panther_shell::{LabelView, Shell};
+use panther_shell::{LabelView, ScaleFactor, Shell};
 use purr_embedding::{DocumentSession, ViewportGeometry, m2_demonstration_fixture};
 use purr_graphics::{
     AlphaMode, BackendKind, DrawCommand, Extent2d, FrameSubmission, FrameToken,
@@ -111,14 +111,14 @@ fn producer() -> ChromeText {
     let english = Locale::parse("en").expect("the reference locale is valid");
     let resolver = LocaleResolver::new(vec![english.clone()], vec![english]);
     let state = ActiveLocaleState::new(resolver, LocaleRequest::new());
-    ChromeText::new(state, MessageCatalog::load()).expect("the producer builds")
+    ChromeText::new(state, MessageCatalog::load(), ScaleFactor::ONE).expect("the producer builds")
 }
 
 #[test]
 fn the_chrome_atlas_realizes_and_the_merged_frame_submits_with_its_upload() {
     // The shell paints the producer's labels as quads naming the chrome atlas.
     let producer = producer();
-    let mut shell = Shell::new(EXTENT);
+    let mut shell = Shell::new(EXTENT, ScaleFactor::ONE);
     shell.set_labels(LabelView::new(producer.view().runs().to_vec()));
     let mut chrome_commands = shell.build_commands();
 

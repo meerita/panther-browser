@@ -24,6 +24,7 @@ use panther_localization::{
     ActiveLocaleState, BakedResourceProvider, LocaleRequest, LocaleResolver, MessageCatalog,
     ResourceProvider,
 };
+use panther_shell::ScaleFactor;
 
 fn main() -> Result<()> {
     let result = bootstrap()?;
@@ -47,7 +48,10 @@ fn main() -> Result<()> {
 
     let resolver = LocaleResolver::with_system_detection(BakedResourceProvider.available_locales());
     let state = ActiveLocaleState::new(resolver, LocaleRequest::new());
-    let chrome_text = ChromeText::new(state, MessageCatalog::load())?;
+    // The composition root has no window yet, so it builds the producer at the
+    // identity scale. The window reads the real display scale at init and drives
+    // the producer to it before the first paint.
+    let chrome_text = ChromeText::new(state, MessageCatalog::load(), ScaleFactor::ONE)?;
 
     panther_window::run_window(tab_model, chrome_text)?;
 
