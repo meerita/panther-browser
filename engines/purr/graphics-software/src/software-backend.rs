@@ -63,8 +63,8 @@ use softbuffer::{Context, Surface};
 /// A single-process backend has one producer, so the namespace is fixed.
 const BACKEND_NAMESPACE: u32 = 1;
 
-/// Bytes one texel occupies for the M0 format set. Every M0 format is four
-/// bytes; `channel_order` guards the assumption with an exhaustive match.
+/// Bytes one texel of a presentation target occupies. Every presentation format
+/// is four bytes; `channel_order` guards the assumption with an exhaustive match.
 const BYTES_PER_TEXEL: u32 = 4;
 
 /// Shared neutral handle type the on-screen present retains.
@@ -105,11 +105,13 @@ struct SoftwareFramebuffer {
 /// One CPU texture owned by the backend.
 ///
 /// The extent is kept so a `TexturedQuad` can map a source rectangle in texels
-/// and clamp a sample to the texture edge.
+/// and clamp a sample to the texture edge. The format gives the texel size and,
+/// for a single-channel coverage mask, marks the texture as coverage the quad
+/// colorizes.
 #[derive(Debug)]
 struct SoftwareTexture {
     extent: Extent2d,
-    order: [usize; 4],
+    format: TextureFormatClass,
     pixels: Vec<u8>,
 }
 
@@ -265,7 +267,7 @@ impl GraphicsBackend for SoftwareBackend {
         descriptor: PresentationTargetDescriptor,
     ) -> Result<SurfaceIdentity, GraphicsError> {
         validate_extent(descriptor.extent)?;
-        let length = buffer_length(descriptor.extent)?;
+        let length = buffer_length(descriptor.extent, BYTES_PER_TEXEL)?;
         let order = channel_order(descriptor.format);
 
         let presenter = match surface.owned_handle() {
@@ -294,7 +296,7 @@ impl GraphicsBackend for SoftwareBackend {
         extent: Extent2d,
     ) -> Result<(), GraphicsError> {
         validate_extent(extent)?;
-        let length = buffer_length(extent)?;
+        let length = buffer_length(extent, BYTES_PER_TEXEL)?;
 
         let target = self
             .targets
@@ -318,15 +320,14 @@ impl GraphicsBackend for SoftwareBackend {
         descriptor: &TextureDescriptor,
     ) -> Result<GpuResourceIdentity, GraphicsError> {
         descriptor.validate()?;
-        let length = buffer_length(descriptor.extent)?;
-        let order = channel_order(descriptor.format);
+        let length = buffer_length(descriptor.extent, descriptor.format.bytes_per_texel())?;
 
         let identity = self.next_resource_identity();
         self.resources.insert(
             identity,
             SoftwareTexture {
                 extent: descriptor.extent,
-                order,
+                format: descriptor.format,
                 pixels: vec![0u8; length],
             },
         );
@@ -467,15 +468,15 @@ fn validate_extent(extent: Extent2d) -> Result<(), GraphicsError> {
     Ok(())
 }
 
-/// Returns the tightly packed byte length of a four-byte-per-texel buffer.
+/// Returns the tightly packed byte length of a buffer at a texel size.
 ///
 /// The extent passed validation, so width and height are within the M0 bound.
 /// The product is still computed with checked arithmetic as a defensive guard,
 /// and the result must fit `usize` to allocate.
-fn buffer_length(extent: Extent2d) -> Result<usize, GraphicsError> {
+fn buffer_length(extent: Extent2d, bytes_per_texel: u32) -> Result<usize, GraphicsError> {
     let bytes = u64::from(extent.width)
         .checked_mul(u64::from(extent.height))
-        .and_then(|texels| texels.checked_mul(u64::from(BYTES_PER_TEXEL)))
+        .and_then(|texels| texels.checked_mul(u64::from(bytes_per_texel)))
         .ok_or(GraphicsError::InvalidDescriptor)?;
 
     usize::try_from(bytes).map_err(|_| GraphicsError::InvalidDescriptor)
@@ -495,11 +496,12 @@ fn render_commands(
                 rect,
                 texture,
                 source,
+                color,
             } => {
                 let texture = resources
                     .get(texture)
                     .ok_or(GraphicsError::ResourceNotFound)?;
-                textured_quad(target, texture, *rect, *source);
+                textured_quad(target, texture, *rect, *source, *color);
             }
         }
     }
@@ -545,7 +547,12 @@ fn fill_rect(target: &mut SoftwareFramebuffer, rect: Rect, color: Color) {
     }
 }
 
-/// Composites a texture region over a clipped destination rectangle.
+/// Composites a colorized coverage region over a clipped destination rectangle.
+///
+/// The source texture is a coverage mask: its first byte per texel is the glyph
+/// coverage. Each covered texel takes the straight-alpha `color` with its alpha
+/// scaled by the sampled coverage, then composites source-over, so anti-aliased
+/// edges blend the color into the target instead of leaving a dark rim.
 ///
 /// The destination is rounded and clipped like a fill. The source region is
 /// rounded to integer texels. Sampling is nearest neighbor computed in integer
@@ -559,6 +566,7 @@ fn textured_quad(
     texture: &SoftwareTexture,
     rect: Rect,
     source: Rect,
+    color: Color,
 ) {
     let dest = rect_to_pixels(rect);
     let dest_width = dest.x1 - dest.x0;
@@ -578,12 +586,13 @@ fn textured_quad(
         return;
     };
 
+    let color_rgba = quantize_color(color);
     let target_width = target.extent.width as usize;
     let target_order = target.order;
     let texture_width = i64::from(texture.extent.width);
     let texture_height = i64::from(texture.extent.height);
     let texture_stride = texture.extent.width as usize;
-    let texture_order = texture.order;
+    let texel_bytes = texture.format.bytes_per_texel() as usize;
 
     for y in bounds.y0..bounds.y1 {
         let local_y = y as i64 - dest.y0;
@@ -597,9 +606,13 @@ fn textured_quad(
             let local_x = x as i64 - dest.x0;
             let sample_x = clamp_index(src.x0 + local_x * source_width / dest_width, texture_width);
 
-            let source_offset = (texture_row + sample_x as usize) * 4;
-            let source_texel = &texture.pixels[source_offset..source_offset + 4];
-            let source_rgba = read_rgba(source_texel, texture_order);
+            let coverage = texture.pixels[(texture_row + sample_x as usize) * texel_bytes];
+            let source_rgba = [
+                color_rgba[0],
+                color_rgba[1],
+                color_rgba[2],
+                scale_alpha(color_rgba[3], coverage),
+            ];
 
             let target_offset = (target_row + x) * 4;
             let target_texel = &mut target.pixels[target_offset..target_offset + 4];
@@ -738,6 +751,15 @@ fn over_channel(src: u8, dst: u8, alpha: u8) -> u8 {
     (value / 255) as u8
 }
 
+/// Scales a straight-alpha value by a coverage byte.
+///
+/// `out = (alpha * coverage + 127) / 255` with rounded integer division, so full
+/// coverage keeps the alpha and zero coverage removes it. This runs per texel.
+fn scale_alpha(alpha: u8, coverage: u8) -> u8 {
+    let value = u32::from(alpha) * u32::from(coverage) + 127;
+    (value / 255) as u8
+}
+
 /// Composites the source alpha over the destination alpha.
 ///
 /// `out = (src * 255 + dst * (255 - src) + 127) / 255`, the source-over rule for
@@ -757,7 +779,9 @@ fn over_alpha(src: u8, dst: u8) -> u8 {
 /// The exhaustive match forces a review when a new format class is added.
 fn channel_order(format: TextureFormatClass) -> [usize; 4] {
     match format {
-        TextureFormatClass::Rgba8Unorm | TextureFormatClass::Rgba8UnormSrgb => [0, 1, 2, 3],
+        TextureFormatClass::Rgba8Unorm
+        | TextureFormatClass::Rgba8UnormSrgb
+        | TextureFormatClass::R8Unorm => [0, 1, 2, 3],
         TextureFormatClass::Bgra8Unorm => [2, 1, 0, 3],
     }
 }
@@ -1021,88 +1045,135 @@ mod tests {
     }
 
     #[test]
-    fn textured_quad_blits_source_bytes() {
+    fn textured_quad_colorizes_full_coverage_with_the_quad_color() {
         let mut backend =
             SoftwareBackend::create(BackendKind::Software).expect("software backend creates");
         let surface = make_target(&mut backend, 2, 2, TextureFormatClass::Rgba8Unorm);
         let texture = backend
-            .allocate_texture(&texture_descriptor(2, 2, TextureFormatClass::Rgba8Unorm))
+            .allocate_texture(&texture_descriptor(2, 2, TextureFormatClass::R8Unorm))
             .expect("valid descriptor allocates");
 
-        let source_pixels: Vec<u8> = vec![
-            255, 0, 0, 255, // (0,0)
-            0, 255, 0, 255, // (1,0)
-            0, 0, 255, 255, // (0,1)
-            255, 255, 0, 255, // (1,1)
-        ];
+        // Full coverage everywhere, so the quad paints its color at every texel.
         let upload = ResourceUpload {
             resource: texture,
-            descriptor: texture_descriptor(2, 2, TextureFormatClass::Rgba8Unorm),
-            pixels: source_pixels.clone(),
+            descriptor: texture_descriptor(2, 2, TextureFormatClass::R8Unorm),
+            pixels: vec![255, 255, 255, 255],
         };
 
         let frame = submission(
             surface,
             TextureFormatClass::Rgba8Unorm,
             vec![upload],
-            vec![DrawCommand::TexturedQuad {
-                rect: Rect::new(0.0, 0.0, 2.0, 2.0),
-                texture,
-                source: Rect::new(0.0, 0.0, 2.0, 2.0),
-            }],
+            vec![
+                DrawCommand::Clear {
+                    color: Color::new(0.0, 0.0, 0.0, 1.0),
+                },
+                DrawCommand::TexturedQuad {
+                    rect: Rect::new(0.0, 0.0, 2.0, 2.0),
+                    texture,
+                    source: Rect::new(0.0, 0.0, 2.0, 2.0),
+                    color: Color::new(1.0, 0.0, 0.0, 1.0),
+                },
+            ],
         );
         backend.submit(surface, &frame).expect("submit succeeds");
 
-        assert_eq!(
-            backend.read_framebuffer(surface),
-            Some(source_pixels.as_slice())
-        );
-    }
-
-    #[test]
-    fn textured_quad_upscales_with_nearest_neighbor() {
-        let mut backend =
-            SoftwareBackend::create(BackendKind::Software).expect("software backend creates");
-        let surface = make_target(&mut backend, 2, 2, TextureFormatClass::Rgba8Unorm);
-        let texture = backend
-            .allocate_texture(&texture_descriptor(1, 1, TextureFormatClass::Rgba8Unorm))
-            .expect("valid descriptor allocates");
-
-        let upload = ResourceUpload {
-            resource: texture,
-            descriptor: texture_descriptor(1, 1, TextureFormatClass::Rgba8Unorm),
-            pixels: vec![10, 20, 30, 255],
-        };
-
-        let frame = submission(
-            surface,
-            TextureFormatClass::Rgba8Unorm,
-            vec![upload],
-            vec![DrawCommand::TexturedQuad {
-                rect: Rect::new(0.0, 0.0, 2.0, 2.0),
-                texture,
-                source: Rect::new(0.0, 0.0, 1.0, 1.0),
-            }],
-        );
-        backend.submit(surface, &frame).expect("submit succeeds");
-
-        let expected: Vec<u8> = [10, 20, 30, 255].repeat(4);
+        let expected: Vec<u8> = [255, 0, 0, 255].repeat(4);
         assert_eq!(backend.read_framebuffer(surface), Some(expected.as_slice()));
     }
 
     #[test]
-    fn textured_quad_reorders_channels_for_target_format() {
+    fn textured_quad_scales_the_color_alpha_by_partial_coverage() {
         let mut backend =
             SoftwareBackend::create(BackendKind::Software).expect("software backend creates");
-        let surface = make_target(&mut backend, 1, 1, TextureFormatClass::Bgra8Unorm);
+        let surface = make_target(&mut backend, 1, 1, TextureFormatClass::Rgba8Unorm);
         let texture = backend
-            .allocate_texture(&texture_descriptor(1, 1, TextureFormatClass::Rgba8Unorm))
+            .allocate_texture(&texture_descriptor(1, 1, TextureFormatClass::R8Unorm))
+            .expect("valid descriptor allocates");
+
+        // Half coverage of opaque white over black blends to a mid gray.
+        let upload = ResourceUpload {
+            resource: texture,
+            descriptor: texture_descriptor(1, 1, TextureFormatClass::R8Unorm),
+            pixels: vec![128],
+        };
+
+        let frame = submission(
+            surface,
+            TextureFormatClass::Rgba8Unorm,
+            vec![upload],
+            vec![
+                DrawCommand::Clear {
+                    color: Color::new(0.0, 0.0, 0.0, 1.0),
+                },
+                DrawCommand::TexturedQuad {
+                    rect: Rect::new(0.0, 0.0, 1.0, 1.0),
+                    texture,
+                    source: Rect::new(0.0, 0.0, 1.0, 1.0),
+                    color: Color::new(1.0, 1.0, 1.0, 1.0),
+                },
+            ],
+        );
+        backend.submit(surface, &frame).expect("submit succeeds");
+
+        let alpha = scale_alpha(255, 128);
+        let channel = over_channel(255, 0, alpha);
+        assert_eq!(
+            backend.read_framebuffer(surface),
+            Some([channel, channel, channel, 255].as_slice())
+        );
+    }
+
+    #[test]
+    fn textured_quad_upscales_coverage_with_nearest_neighbor() {
+        let mut backend =
+            SoftwareBackend::create(BackendKind::Software).expect("software backend creates");
+        let surface = make_target(&mut backend, 2, 2, TextureFormatClass::Rgba8Unorm);
+        let texture = backend
+            .allocate_texture(&texture_descriptor(1, 1, TextureFormatClass::R8Unorm))
             .expect("valid descriptor allocates");
 
         let upload = ResourceUpload {
             resource: texture,
-            descriptor: texture_descriptor(1, 1, TextureFormatClass::Rgba8Unorm),
-            pixels: vec![10, 20, 30, 255],
+            descriptor: texture_descriptor(1, 1, TextureFormatClass::R8Unorm),
+            pixels: vec![255],
+        };
+
+        let frame = submission(
+            surface,
+            TextureFormatClass::Rgba8Unorm,
+            vec![upload],
+            vec![
+                DrawCommand::Clear {
+                    color: Color::new(0.0, 0.0, 0.0, 1.0),
+                },
+                DrawCommand::TexturedQuad {
+                    rect: Rect::new(0.0, 0.0, 2.0, 2.0),
+                    texture,
+                    source: Rect::new(0.0, 0.0, 1.0, 1.0),
+                    color: Color::new(0.0, 1.0, 0.0, 1.0),
+                },
+            ],
+        );
+        backend.submit(surface, &frame).expect("submit succeeds");
+
+        let expected: Vec<u8> = [0, 255, 0, 255].repeat(4);
+        assert_eq!(backend.read_framebuffer(surface), Some(expected.as_slice()));
+    }
+
+    #[test]
+    fn textured_quad_writes_the_color_in_target_channel_order() {
+        let mut backend =
+            SoftwareBackend::create(BackendKind::Software).expect("software backend creates");
+        let surface = make_target(&mut backend, 1, 1, TextureFormatClass::Bgra8Unorm);
+        let texture = backend
+            .allocate_texture(&texture_descriptor(1, 1, TextureFormatClass::R8Unorm))
+            .expect("valid descriptor allocates");
+
+        let upload = ResourceUpload {
+            resource: texture,
+            descriptor: texture_descriptor(1, 1, TextureFormatClass::R8Unorm),
+            pixels: vec![255],
         };
 
         let frame = submission(
@@ -1113,10 +1184,12 @@ mod tests {
                 rect: Rect::new(0.0, 0.0, 1.0, 1.0),
                 texture,
                 source: Rect::new(0.0, 0.0, 1.0, 1.0),
+                color: Color::new(10.0 / 255.0, 20.0 / 255.0, 30.0 / 255.0, 1.0),
             }],
         );
         backend.submit(surface, &frame).expect("submit succeeds");
 
+        // Red, green, blue in BGRA byte order.
         assert_eq!(
             backend.read_framebuffer(surface),
             Some([30, 20, 10, 255].as_slice())

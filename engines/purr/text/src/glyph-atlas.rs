@@ -53,8 +53,9 @@ const DEFAULT_ATLAS_WIDTH: u32 = 256;
 /// before any allocation.
 const MAX_ATLAS_GLYPHS: usize = 8_192;
 
-/// Bytes one atlas texel occupies. The atlas format is four-channel 8-bit.
-const BYTES_PER_TEXEL: usize = 4;
+/// Bytes one atlas texel occupies. The atlas is a single-channel coverage mask,
+/// so one texel is one coverage byte.
+const BYTES_PER_TEXEL: usize = 1;
 
 /// A glyph rendered at a pixel size: the key the atlas packs and looks up by.
 ///
@@ -212,8 +213,8 @@ pub fn build_glyph_atlas(
     let pixels = paint_atlas(extent, &rects, &masks)?;
     let descriptor = TextureDescriptor {
         extent,
-        format: TextureFormatClass::Rgba8Unorm,
-        color_space: ColorSpace::Srgb,
+        format: TextureFormatClass::R8Unorm,
+        color_space: ColorSpace::LinearSrgb,
         alpha_mode: AlphaMode::Premultiplied,
         label: Some("glyph-atlas".to_owned()),
     };
@@ -347,9 +348,9 @@ fn advance_shelf(pen_y: u32, shelf_height: u32) -> Result<u32, GlyphAtlasError> 
 /// Allocates the atlas pixel buffer and blits every glyph mask into its rectangle.
 ///
 /// The buffer length is the checked product of the extent and the texel size, so a
-/// buffer that would overflow fails closed. Each mask's single-channel coverage is
-/// written into all four channels of the texel, so a paint stage can sample it as
-/// coverage or as luminance.
+/// buffer that would overflow fails closed. Each mask's coverage is written as one
+/// byte per texel; a paint stage samples the atlas as a coverage mask and applies
+/// the run color itself.
 fn paint_atlas(
     extent: Extent2d,
     rects: &[TexelRect],
@@ -367,7 +368,7 @@ fn paint_atlas(
     Ok(pixels)
 }
 
-/// Blits one glyph mask into its atlas rectangle, in all four channels.
+/// Blits one glyph mask into its atlas rectangle as one coverage byte per texel.
 fn blit_mask(pixels: &mut [u8], atlas_width: u32, rect: &TexelRect, mask: &GlyphMask) {
     if rect.width == 0 || rect.height == 0 {
         return;
@@ -381,11 +382,7 @@ fn blit_mask(pixels: &mut [u8], atlas_width: u32, rect: &TexelRect, mask: &Glyph
         let destination_start =
             (destination_y * atlas_width as usize + rect.x as usize) * BYTES_PER_TEXEL;
         for (column, &value) in source_row.iter().enumerate() {
-            let texel = destination_start + column * BYTES_PER_TEXEL;
-            pixels[texel] = value;
-            pixels[texel + 1] = value;
-            pixels[texel + 2] = value;
-            pixels[texel + 3] = value;
+            pixels[destination_start + column * BYTES_PER_TEXEL] = value;
         }
     }
 }

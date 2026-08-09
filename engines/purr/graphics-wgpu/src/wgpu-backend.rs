@@ -40,10 +40,6 @@ const BACKEND_NAMESPACE: u32 = 1;
 /// Two frames balance latency and throughput and match the `wgpu` default.
 const FRAME_LATENCY: u32 = 2;
 
-/// Bytes one texel occupies for the M0 format set. Every M0 format is four
-/// bytes; the exhaustive match in `texture_format` guards the assumption.
-const BYTES_PER_TEXEL: u32 = 4;
-
 /// Vertices in one quad drawn as two triangles.
 const QUAD_VERTICES: u32 = 6;
 
@@ -235,7 +231,7 @@ impl WgpuBackend {
                 .descriptor
                 .extent
                 .width
-                .checked_mul(BYTES_PER_TEXEL)
+                .checked_mul(upload.descriptor.format.bytes_per_texel())
                 .ok_or(GraphicsError::InvalidDescriptor)?;
             let expected = u64::from(bytes_per_row)
                 .checked_mul(u64::from(upload.descriptor.extent.height))
@@ -295,6 +291,7 @@ impl WgpuBackend {
                     let index = push_uniform(
                         &mut solid_bytes,
                         [-1.0, -1.0, 1.0, 1.0],
+                        [0.0; 4],
                         color_components(*color),
                         slot,
                     );
@@ -306,6 +303,7 @@ impl WgpuBackend {
                     let index = push_uniform(
                         &mut solid_bytes,
                         rect_to_ndc(*rect, extent),
+                        [0.0; 4],
                         color_components(*color),
                         slot,
                     );
@@ -317,6 +315,7 @@ impl WgpuBackend {
                     rect,
                     texture,
                     source,
+                    color,
                 } => {
                     let resource = self
                         .resources
@@ -326,6 +325,7 @@ impl WgpuBackend {
                         &mut textured_bytes,
                         rect_to_ndc(*rect, extent),
                         source_to_uv(*source, resource.extent),
+                        color_components(*color),
                         slot,
                     );
                     let texture_view = resource
@@ -676,11 +676,18 @@ fn slot_offset(index: usize, slot: usize) -> Result<u32, GraphicsError> {
     u32::try_from(offset).map_err(|_| GraphicsError::SubmissionRejected)
 }
 
-/// Appends one draw uniform (two `vec4<f32>`) and pads it to the slot stride.
-/// Returns the slot index of the appended uniform.
-fn push_uniform(buffer: &mut Vec<u8>, first: [f32; 4], second: [f32; 4], slot: usize) -> usize {
+/// Appends one draw uniform (three `vec4<f32>`: rect, source, color) and pads it
+/// to the slot stride. Returns the slot index of the appended uniform. The solid
+/// path passes a zero source region, which its shader ignores.
+fn push_uniform(
+    buffer: &mut Vec<u8>,
+    rect: [f32; 4],
+    source: [f32; 4],
+    color: [f32; 4],
+    slot: usize,
+) -> usize {
     let index = buffer.len() / slot;
-    for value in first.iter().chain(second.iter()) {
+    for value in rect.iter().chain(source.iter()).chain(color.iter()) {
         buffer.extend_from_slice(&value.to_le_bytes());
     }
     buffer.resize((index + 1) * slot, 0);
@@ -732,6 +739,7 @@ fn texture_format(format: TextureFormatClass) -> wgpu::TextureFormat {
         TextureFormatClass::Rgba8Unorm => wgpu::TextureFormat::Rgba8Unorm,
         TextureFormatClass::Bgra8Unorm => wgpu::TextureFormat::Bgra8Unorm,
         TextureFormatClass::Rgba8UnormSrgb => wgpu::TextureFormat::Rgba8UnormSrgb,
+        TextureFormatClass::R8Unorm => wgpu::TextureFormat::R8Unorm,
     }
 }
 
@@ -857,14 +865,26 @@ mod tests {
         );
     }
 
+    fn coverage_descriptor(width: u32, height: u32) -> TextureDescriptor {
+        TextureDescriptor {
+            extent: Extent2d::new(width, height),
+            format: TextureFormatClass::R8Unorm,
+            color_space: ColorSpace::LinearSrgb,
+            alpha_mode: AlphaMode::Premultiplied,
+            label: None,
+        }
+    }
+
     #[test]
     fn encode_frame_draws_the_op_set() {
         let Some(mut backend) = backend_or_skip() else {
             return;
         };
 
+        // The textured quad samples a single-channel coverage atlas, matching the
+        // glyph atlas the paint stage produces.
         let texture = backend
-            .allocate_texture(&texture_descriptor(4, 4))
+            .allocate_texture(&coverage_descriptor(4, 4))
             .expect("valid descriptor allocates");
 
         let format = wgpu::TextureFormat::Rgba8Unorm;
@@ -897,6 +917,7 @@ mod tests {
                 rect: Rect::new(32.0, 32.0, 16.0, 16.0),
                 texture,
                 source: Rect::new(0.0, 0.0, 4.0, 4.0),
+                color: Color::new(0.0, 0.0, 0.0, 1.0),
             },
         ];
 

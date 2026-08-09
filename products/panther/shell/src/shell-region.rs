@@ -61,6 +61,12 @@ pub(crate) const CLOSE_COLOR: Color = Color::new(0.72, 0.34, 0.34, 1.0);
 /// Fill for the new-tab button at the band right.
 pub(crate) const NEW_TAB_COLOR: Color = Color::new(0.30, 0.52, 0.40, 1.0);
 
+/// Color of chrome label text.
+///
+/// A near-white color that reads clearly on the dark chrome controls. It is a
+/// placeholder (D1); a later pass may vary the text color per control state.
+pub(crate) const CHROME_TEXT_COLOR: Color = Color::new(0.90, 0.91, 0.93, 1.0);
+
 impl ShellRegion {
     /// Every region in fixed order, top bar first and viewport last.
     ///

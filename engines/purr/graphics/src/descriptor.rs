@@ -41,12 +41,30 @@ impl Extent2d {
 /// Format class of a texture or render target.
 ///
 /// A closed, minimal M0 set. It names a web-visible format class, not a backend
-/// texture format.
+/// texture format. `R8Unorm` is a single-channel format: the glyph atlas uses it
+/// to store one coverage byte per texel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TextureFormatClass {
     Rgba8Unorm,
     Bgra8Unorm,
     Rgba8UnormSrgb,
+    R8Unorm,
+}
+
+impl TextureFormatClass {
+    /// Bytes one texel of this format occupies.
+    ///
+    /// The four-channel classes are four bytes; the single-channel `R8Unorm` is
+    /// one byte. The exhaustive match forces a review when a new format class is
+    /// added.
+    pub const fn bytes_per_texel(self) -> u32 {
+        match self {
+            TextureFormatClass::Rgba8Unorm
+            | TextureFormatClass::Bgra8Unorm
+            | TextureFormatClass::Rgba8UnormSrgb => 4,
+            TextureFormatClass::R8Unorm => 1,
+        }
+    }
 }
 
 /// Working color space of a resource.

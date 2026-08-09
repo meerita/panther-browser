@@ -2,14 +2,15 @@
 // @description Builds the ordered draw-command list that paints the shell chrome.
 // @created Diego Martín Lafuente <meerita@icloud.com>
 
-use purr_graphics::{DrawCommand, Rect};
+use purr_graphics::{Color, DrawCommand, Rect};
 use purr_text::{ONE_PX_RAW, PlacedGlyphRun, TextUnit};
 
 use crate::labels::LabelView;
 use crate::region_layout::RegionLayout;
 use crate::scale_factor::ScaleFactor;
 use crate::shell_region::{
-    ACTIVE_TAB_COLOR, CLEAR_COLOR, CLOSE_COLOR, INACTIVE_TAB_COLOR, NEW_TAB_COLOR, ShellRegion,
+    ACTIVE_TAB_COLOR, CHROME_TEXT_COLOR, CLEAR_COLOR, CLOSE_COLOR, INACTIVE_TAB_COLOR,
+    NEW_TAB_COLOR, ShellRegion,
 };
 use crate::tab_strip::{TabStripView, strip_layout};
 
@@ -117,7 +118,7 @@ fn push_label_quads(
         let physical_rect = scale.scale_rect(layout.rect(*region));
         let start_x = run_start_x(physical_rect, run, alignment(*region), scale);
         let baseline = run_baseline(physical_rect, run);
-        push_run(run, start_x, baseline, commands);
+        push_run(run, start_x, baseline, CHROME_TEXT_COLOR, commands);
     }
 }
 
@@ -127,7 +128,13 @@ fn push_label_quads(
 /// quad offsets from the pen and baseline by the glyph bearings and samples the
 /// run atlas at the glyph source rectangle, converted from physical texels to
 /// texel coordinates.
-fn push_run(run: &PlacedGlyphRun, start_x: f32, baseline: f32, commands: &mut Vec<DrawCommand>) {
+fn push_run(
+    run: &PlacedGlyphRun,
+    start_x: f32,
+    baseline: f32,
+    color: Color,
+    commands: &mut Vec<DrawCommand>,
+) {
     let mut pen = start_x;
     for glyph in run.glyphs() {
         let source = glyph.source();
@@ -145,6 +152,7 @@ fn push_run(run: &PlacedGlyphRun, start_x: f32, baseline: f32, commands: &mut Ve
                 source.width as f32,
                 source.height as f32,
             ),
+            color,
         });
         pen += to_px(glyph.advance());
     }

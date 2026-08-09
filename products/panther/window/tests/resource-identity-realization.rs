@@ -111,6 +111,7 @@ fn atlas_quad(namespace: u32) -> DrawCommand {
         rect: Rect::new(0.0, 0.0, 2.0, 2.0),
         texture: engine_identity(namespace),
         source: Rect::new(0.0, 0.0, 2.0, 2.0),
+        color: Color::new(0.0, 0.0, 0.0, 1.0),
     }
 }
 

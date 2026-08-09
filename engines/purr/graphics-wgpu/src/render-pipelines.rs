@@ -14,8 +14,11 @@
 
 use purr_graphics::GraphicsError;
 
-/// Byte size of one draw uniform (two `vec4<f32>`).
-pub(crate) const UNIFORM_BYTES: u64 = 32;
+/// Byte size of one draw uniform (three `vec4<f32>`: rect, source, color).
+///
+/// Both pipelines share this layout. The solid pipeline leaves the source region
+/// unused; the textured pipeline uses all three.
+pub(crate) const UNIFORM_BYTES: u64 = 48;
 
 /// Vertex shader entry point shared by both pipelines.
 const VERTEX_ENTRY: &str = "vs_main";
@@ -227,11 +230,16 @@ fn primitive_state() -> wgpu::PrimitiveState {
     }
 }
 
-/// The color target with straight alpha blending for the given format.
+/// The color target with premultiplied alpha blending for the given format.
+///
+/// Both pipelines output premultiplied color, so the source factor is `One`. An
+/// opaque draw (alpha one) is identical to straight-alpha blending, so solid
+/// fills and clears are unchanged; a partially covered glyph edge composites
+/// correctly instead of darkening toward the cleared target.
 fn color_target(format: wgpu::TextureFormat) -> wgpu::ColorTargetState {
     wgpu::ColorTargetState {
         format,
-        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+        blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
         write_mask: wgpu::ColorWrites::ALL,
     }
 }
