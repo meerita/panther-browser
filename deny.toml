@@ -8,7 +8,11 @@ all-features = true
 [advisories]
 version = 2
 yanked = "deny"
-ignore = []
+# `ttf-parser` is unmaintained (informational, pure-Rust, no unsafe, no known
+# vulnerability). It reaches the tree only through the winit `wayland-csd-adwaita`
+# feature (Linux Wayland client-side decoration fallback) and has no safe upgrade.
+# Remove this entry when winit migrates off `ab_glyph`/`ttf-parser`.
+ignore = ["RUSTSEC-2026-0192"]
 
 [licenses]
 version = 2
