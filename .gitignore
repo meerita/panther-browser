@@ -1,7 +1,8 @@
-# Internal working directories
+# Internal working directories and governance corpus
 tmp/
 .claude/
 .agents/
+AGENTS.md
 CLAUDE.md
 
 # Rust
