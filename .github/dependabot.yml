@@ -12,3 +12,12 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # fluent-langneg 0.13 depends on unic-langid. Version 0.14 replaced it
+      # with icu_locid. The locale foundation passes unic-langid language
+      # identifiers into negotiate_languages, and three crates share those
+      # types, so 0.14 and later are incompatible with the current locale
+      # model. Adopting icu_locid is a separate decision. Remove this entry
+      # when that decision is made.
+      - dependency-name: fluent-langneg
+        versions: [">= 0.14"]
