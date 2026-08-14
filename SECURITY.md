@@ -3,7 +3,7 @@
 ## Supported Versions
 
 Panther is in early development. The project has not published a release
-yet. Security fixes apply only to the current state of the `main` branch
+yet. Security fixes apply only to the current state of the `dev` branch
 until the project publishes its first release.
 
 ## Reporting a Vulnerability
