@@ -66,7 +66,7 @@ impl AccountingRegistry {
         let counters = &self.regions[region.index()];
         let _ = counters
             .resident
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |resident| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |resident| {
                 Some(resident.saturating_sub(bytes.get()))
             });
     }
