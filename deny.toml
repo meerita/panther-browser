@@ -12,7 +12,14 @@ yanked = "deny"
 # vulnerability). It reaches the tree only through the winit `wayland-csd-adwaita`
 # feature (Linux Wayland client-side decoration fallback) and has no safe upgrade.
 # Remove this entry when winit migrates off `ab_glyph`/`ttf-parser`.
-ignore = ["RUSTSEC-2026-0192"]
+#
+# `basic-toml` 0.1.10 is unmaintained (RUSTSEC-2026-0374, informational, no known
+# vulnerability) and has no safe upgrade. It reaches the tree only through
+# `i18n-config` 0.4.8, inside the `i18n-embed-fl` and `i18n-embed-impl`
+# proc-macros, where it parses the repository's own `Cargo.toml` and `i18n.toml`
+# at compile time. It is not linked into the shipped binary and never reads
+# remote input. Remove this entry when `i18n-config` moves off `basic-toml`.
+ignore = ["RUSTSEC-2026-0192", "RUSTSEC-2026-0374"]
 
 [licenses]
 version = 2
