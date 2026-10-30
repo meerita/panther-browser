@@ -440,7 +440,7 @@ impl WindowPresenter {
             return Err(GraphicsError::SubmissionRejected);
         }
 
-        for (texel, slot) in pixels.chunks_exact(4).zip(buffer.iter_mut()) {
+        for (texel, slot) in pixels.as_chunks::<4>().0.iter().zip(buffer.iter_mut()) {
             *slot = texel_to_display_pixel(texel, order);
         }
 
@@ -518,8 +518,8 @@ fn clear_target(target: &mut SoftwareFramebuffer, color: Color) {
     let mut texel = [0u8; 4];
     write_rgba(&mut texel, target.order, rgba);
 
-    for chunk in target.pixels.chunks_exact_mut(4) {
-        chunk.copy_from_slice(&texel);
+    for chunk in target.pixels.as_chunks_mut::<4>().0 {
+        *chunk = texel;
     }
 }
 
